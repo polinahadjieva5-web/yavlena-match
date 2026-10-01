@@ -24,7 +24,7 @@ export default function AppShell({children}:{children:React.ReactNode}){
     <aside className="sidebar">
       <div className="brand"><div className="brandMark"><Building2 size={19}/></div><div><b>Yavlena Match</b><span>Buyer intelligence</span></div></div>
       <nav>{nav.map(i=>{const I=i.icon; const active=path===i.href||path.startsWith(i.href+'/'); return <Link className={active?'navItem active':'navItem'} key={i.href} href={i.href}><I size={18}/>{i.label}</Link>})}</nav>
-      <div className="sideFoot"><div className="sourceNote">Самостоятелна система<br/><b>Без данни от Premium / Million+ / Team 4</b>{role&&<><br/><span>Роля: {role==='admin'?'Администратор':role==='manager'?'Мениджър':'Брокер'}</span></>}</div><button className="logout" onClick={logout}><LogOut size={17}/>Изход</button></div>
+      <div className="sideFoot"><button className="logout" onClick={logout}><LogOut size={17}/>Изход</button></div>
     </aside>
     <main className="content">{children}</main>
   </div>
