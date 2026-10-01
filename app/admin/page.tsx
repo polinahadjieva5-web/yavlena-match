@@ -1,7 +1,8 @@
 'use client'
 import {useEffect,useState} from 'react'
 import {useRouter} from 'next/navigation'
-import {ShieldCheck,KeyRound,Building2} from 'lucide-react'
+import Link from 'next/link'
+import {ShieldCheck,KeyRound,Building2,CalendarRange,ArrowRight} from 'lucide-react'
 import {supabase} from '@/lib/supabase'
 
 type Role='broker'|'manager'|'admin'
@@ -24,15 +25,23 @@ export default function AdminPage(){
   if(role!=='admin')return null
 
   return <>
-    <div className="topline"><div><div className="eyebrow">Само за администратори</div><h1>Администрация</h1><div className="subtitle">Управление на системните настройки и фирмените профили за порталите.</div></div></div>
+    <div className="topline"><div><div className="eyebrow">Само за администратори</div><h1>Администрация</h1><div className="subtitle">Управление на системата, оперативките и фирмените профили.</div></div></div>
     <div className="grid4">
       <div className="stat"><ShieldCheck size={22}/><span className="label">Достъп</span><strong>Admin</strong><span className="delta">защитена секция</span></div>
       <div className="stat"><Building2 size={22}/><span className="label">Портали</span><strong>5</strong><span className="delta">конфигурирани източника</span></div>
       <div className="stat"><KeyRound size={22}/><span className="label">Фирмени профили</span><strong>0</strong><span className="delta">предстои свързване</span></div>
+      <div className="stat"><CalendarRange size={22}/><span className="label">Оперативка</span><strong>10</strong><span className="delta">целеви предложения</span></div>
     </div>
-    <div className="card" style={{marginTop:18}}>
-      <h2>Фирмени профили / портали</h2>
-      <div className="empty">Тук ще добавим защитеното свързване към фирмените профили за частните обяви. Брокерите няма да виждат тази секция.</div>
+    <div className="split" style={{marginTop:18}}>
+      <div className="card">
+        <h2>Моята оперативка</h2>
+        <div className="meta">Подбор на интересни и непрезентирани оферти, история на ID-тата и директни линкове.</div>
+        <Link className="btn primary" style={{marginTop:16}} href="/operations"><CalendarRange size={16}/>Отвори оперативката<ArrowRight size={16}/></Link>
+      </div>
+      <div className="card">
+        <h2>Фирмени профили / портали</h2>
+        <div className="meta">Защитено свързване към фирмените профили за частните обяви. Брокерите нямат достъп.</div>
+      </div>
     </div>
   </>
 }
