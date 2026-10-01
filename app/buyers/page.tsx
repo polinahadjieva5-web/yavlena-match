@@ -58,10 +58,12 @@ export default function Buyers(){
     const s=b.buyer_searches?.[0];if(!s)return
     setSearching(b.id);setMsg('')
     setSearchInfo(`Прилагам филтри: ${(s.property_types||[]).join(', ')||'всички типове'} · ${(s.districts||[]).join(', ')||'всички райони'}${s.price_max?` · до €${Number(s.price_max).toLocaleString('bg-BG')}`:''}${s.area_min?` · от ${s.area_min} кв.м`:''}`)
+
     try{
       const publicReq=timed(supabase.functions.invoke('portal-search',{body:{buyer_id:b.id,run_type:'manual'}}) as any,55000,'Публичното търсене')
       const estateReq=timed(supabase.functions.invoke('estate-assistant-search',{body:{buyer_id:b.id,run_type:'manual'}}) as any,45000,'Estate Assistant')
-      const [pubRes,estateRes]=await Promise.allSettled([publicReq,estateReq])
+      const imotReq=timed(supabase.functions.invoke('imot-firm-search',{body:{buyer_id:b.id,run_type:'manual'}}) as any,45000,'Imot.bg')
+      const [pubRes,estateRes,imotRes]=await Promise.allSettled([publicReq,estateReq,imotReq])
 
       let total=0,privateCount=0,agencyCount=0
       const details:string[]=[]
@@ -71,7 +73,9 @@ export default function Buyers(){
         const r:any=pubRes.value
         if(!r?.error){
           anySuccess=true
-          total+=Number(r?.data?.total||0);privateCount+=Number(r?.data?.private_count||0);agencyCount+=Number(r?.data?.agency_count||0)
+          total+=Number(r?.data?.total||0)
+          privateCount+=Number(r?.data?.private_count||0)
+          agencyCount+=Number(r?.data?.agency_count||0)
           const stats=(r?.data?.portal_stats||[]).reduce((a:any,x:any)=>{a[x.source]=(a[x.source]||0)+(x.count||0);return a},{})
           Object.entries(stats).forEach(([k,v])=>details.push(`${k}: ${v}`))
         }else details.push('Публични портали: грешка')
@@ -81,13 +85,23 @@ export default function Buyers(){
         const r:any=estateRes.value
         if(!r?.error){
           anySuccess=true
-          total+=Number(r?.data?.total||0);privateCount+=Number(r?.data?.private_count||0);agencyCount+=Number(r?.data?.agency_count||0)
+          total+=Number(r?.data?.total||0)
+          privateCount+=Number(r?.data?.private_count||0)
+          agencyCount+=Number(r?.data?.agency_count||0)
           details.push(`Estate Assistant: ${Number(r?.data?.total||0)}`)
-        }else{
-          const text=String(r?.error?.message||'')
-          details.push(text.includes('non-2xx')?'Estate Assistant: не е свързан':'Estate Assistant: грешка')
-        }
+        }else details.push('Estate Assistant: не е свързан')
       }else details.push('Estate Assistant: timeout')
+
+      if(imotRes.status==='fulfilled'){
+        const r:any=imotRes.value
+        if(!r?.error){
+          anySuccess=true
+          total+=Number(r?.data?.total||0)
+          privateCount+=Number(r?.data?.private_count||0)
+          agencyCount+=Number(r?.data?.agency_count||0)
+          details.push(`Imot.bg фирмен: ${Number(r?.data?.total||0)}`)
+        }else details.push('Imot.bg фирмен: не е свързан')
+      }else details.push('Imot.bg фирмен: timeout')
 
       if(anySuccess)setMsg(`Готово: намерени ${total} оферти · частни ${privateCount} · агенции ${agencyCount}${details.length?` · ${details.join(' · ')}`:''}`)
       else setMsg(`Търсенето не успя. ${details.join(' · ')}`)
@@ -115,12 +129,13 @@ export default function Buyers(){
     <div className="topline"><div><div className="eyebrow">Клиентски търсения</div><h1>Моите купувачи</h1><div className="subtitle">Търсене във външни имотни портали, история и постоянен мониторинг.</div></div><button className="btn primary" onClick={()=>setOpen(true)}><Plus size={17}/>Добави купувач</button></div>
     {searchInfo&&<div className="ok" style={{marginBottom:10}}>{searchInfo}</div>}
     {msg&&<div className={msg.startsWith('Готово')?'ok':'err'} style={{marginBottom:14}}>{msg}</div>}
+
     <div className="listCard">{buyers.length?buyers.map(b=>{const s=b.buyer_searches?.[0];return <div className="buyerBlock" key={b.id}>
       <div className="buyerRow"><span className="statusDot"/><div className="grow"><b>{b.full_name}</b><div className="meta">{(s?.property_types||[]).join(', ')||'Имот'} · {(s?.districts||[]).join(', ')||'Всички райони'} · {s?.price_max?`до €${Number(s.price_max).toLocaleString('bg-BG')}`:'без лимит'}{s?.area_min?` · от ${s.area_min} кв.м`:''}</div><div className="meta">{s?.last_manual_search_at?`Последно ръчно търсене: ${new Date(s.last_manual_search_at).toLocaleString('bg-BG')}`:'Няма стартирано търсене'}</div></div><span className="tag">{s?.monitoring_enabled?'Мониторинг включен':'Мониторинг изключен'}</span></div>
       <div className="buyerActions"><button className="btn primary" onClick={()=>searchNow(b)} disabled={searching===b.id}><Search size={16}/>{searching===b.id?'Търся по критериите...':'Потърси оферти'}</button><button className="btn" onClick={()=>openResults(b)}>Виж резултати</button><button className="btn" onClick={()=>toggleMonitoring(b)}>{s?.monitoring_enabled?<BellOff size={16}/>:<Bell size={16}/>} {s?.monitoring_enabled?'Спри известия':'Включи известия'}</button></div>
     </div>}):<div className="empty" style={{margin:'14px 0'}}>Няма добавени купувачи.</div>}</div>
 
-    {selected&&<div className="card resultsCard"><div className="toolbar"><div><h2 style={{margin:0}}>Оферти за {selected.full_name}</h2><div className="meta">Публичните портали и Estate Assistant се търсят по критериите на купувача. Резултатите се проверяват втори път и се подреждат по най-новите.</div></div><button className="btn" onClick={()=>setSelected(null)}>Скрий</button></div>{results.length?results.sort((a,b)=>new Date(b.offers?.source_published_at||b.created_at).getTime()-new Date(a.offers?.source_published_at||a.created_at).getTime()).map(r=><div className="offerResult" key={r.id}><div className="grow"><div className="offerTop"><b>{r.offers?.title||'Имотна оферта'}</b><span className={r.offers?.advertiser_type==='private'?'pill private':r.offers?.advertiser_type==='agency'?'pill agency':'pill'}>{r.offers?.advertiser_type==='private'?'Частно лице':r.offers?.advertiser_type==='agency'?'Агенция':'Неуточнен подател'}</span></div><div className="meta">{r.offers?.district||'—'} · {r.offers?.price_eur?`€${Number(r.offers.price_eur).toLocaleString('bg-BG')}`:'без цена'} · съвпадение {r.match_score??'—'}% · {r.offers?.source_published_at?new Date(r.offers.source_published_at).toLocaleString('bg-BG'):'открита при последната проверка'}</div></div>{r.offers?.original_url&&<a className="btn" href={r.offers.original_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Отвори</a>}</div>):<div className="empty">Няма върнати оферти за тези критерии.</div>}</div>}
+    {selected&&<div className="card resultsCard"><div className="toolbar"><div><h2 style={{margin:0}}>Оферти за {selected.full_name}</h2><div className="meta">Estate Assistant и Imot.bg се търсят през фирмените сесии; останалите портали — през публичните им страници. Всички резултати се проверяват по критериите на купувача.</div></div><button className="btn" onClick={()=>setSelected(null)}>Скрий</button></div>{results.length?results.sort((a,b)=>new Date(b.offers?.source_published_at||b.created_at).getTime()-new Date(a.offers?.source_published_at||a.created_at).getTime()).map(r=><div className="offerResult" key={r.id}><div className="grow"><div className="offerTop"><b>{r.offers?.title||'Имотна оферта'}</b><span className={r.offers?.advertiser_type==='private'?'pill private':r.offers?.advertiser_type==='agency'?'pill agency':'pill'}>{r.offers?.advertiser_type==='private'?'Частно лице':r.offers?.advertiser_type==='agency'?'Агенция':'Неуточнен подател'}</span></div><div className="meta">{r.offers?.district||'—'} · {r.offers?.price_eur?`€${Number(r.offers.price_eur).toLocaleString('bg-BG')}`:'без цена'} · съвпадение {r.match_score??'—'}% · {r.offers?.source_published_at?new Date(r.offers.source_published_at).toLocaleString('bg-BG'):'открита при последната проверка'}</div></div>{r.offers?.original_url&&<a className="btn" href={r.offers.original_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Отвори</a>}</div>):<div className="empty">Няма върнати оферти за тези критерии.</div>}</div>}
 
     {open&&<div className="modalBack"><form className="modal" onSubmit={create}><div className="modalHead"><div><div className="eyebrow">Нов клиент</div><h2 style={{margin:'4px 0'}}>Критерии за автоматично търсене</h2></div><button type="button" className="x" onClick={()=>setOpen(false)}><X size={18}/></button></div><div className="formGrid">
       <div className="field"><label>Име на клиента</label><input required value={f.full_name} onChange={e=>setF({...f,full_name:e.target.value})}/></div>
