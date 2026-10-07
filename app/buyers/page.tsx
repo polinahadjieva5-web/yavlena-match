@@ -16,6 +16,44 @@ const split=(v:string)=>v.split(',').map(s=>s.trim()).filter(Boolean)
 const numOrNull=(v:any)=>v===''||v===null||v===undefined?null:Number(v)
 const norm=(v:any)=>String(v||'').toLowerCase().trim()
 
+const PROPERTY_TYPES=['1-стаен','2-стаен','3-стаен','4-стаен','Многостаен','Мезонет','Ателие / студио','Къща','Вила','Парцел','Гараж','Офис','Магазин']
+const DISTRICTS=[
+  '7-ми 11-ти километър','Абдовица','Банишора','Белите брези','Бенковски','Борово','Бояна','Бъкстон','Витоша','Военна рампа',
+  'Враждебна','Гевгелийски','Гео Милев','Горна баня','Горубляне','Дианабад','Докторски паметник','Драгалевци','Дружба 1','Дружба 2',
+  'Дървеница','Западен парк','Захарна фабрика','Зона Б-5','Зона Б-18','Зона Б-19','Иван Вазов','Изгрев','Изток','Илинден',
+  'Карпузица','Княжево','Красна поляна 1','Красна поляна 2','Красна поляна 3','Красно село','Кръстова вада','Лагера','Левски','Левски В',
+  'Левски Г','Лозенец','Люлин 1','Люлин 2','Люлин 3','Люлин 4','Люлин 5','Люлин 6','Люлин 7','Люлин 8','Люлин 9','Люлин 10',
+  'Малинова долина','Манастирски ливади','Медицинска академия','Младост 1','Младост 1А','Младост 2','Младост 3','Младост 4','Модерно предградие',
+  'Мусагеница','Надежда 1','Надежда 2','Надежда 3','Надежда 4','Обеля 1','Обеля 2','Оборище','Овча купел','Овча купел 1',
+  'Овча купел 2','Орландовци','Павлово','Подуяне','Полигона','Разсадника','Редута','Република','Света Троица','Свобода',
+  'Симеоново','Славия','Слатина','Стрелбище','Студентски град','Сухата река','Толстой','Триъгълника','Фондови жилища','Хаджи Димитър',
+  'Хиподрума','Хладилника','Център','Яворов'
+]
+const CONSTRUCTION_TYPES=['Тухла','Панел','ЕПК','Гредоред','Ново строителство']
+const FLOORS=Array.from({length:21},(_,i)=>i)
+const YEARS=[1950,1960,1970,1980,1990,2000,2005,2010,2015,2020,2022,2023,2024,2025,2026]
+const MONITORING_OPTIONS=[5,10,15,30,60,120,360,720,1440]
+
+function MultiSelect({label,value,options,onChange,full=false,placeholder='Избери'}:any){
+  const selected=split(value)
+  function toggle(option:string){
+    const next=selected.includes(option)?selected.filter((x:string)=>x!==option):[...selected,option]
+    onChange(next.join(', '))
+  }
+  return <div className={full?'field full':'field'}>
+    <label>{label}</label>
+    <details className="multiSelect">
+      <summary>{selected.length?selected.join(', '):placeholder}<span className="multiCount">{selected.length||''}</span></summary>
+      <div className="multiMenu">
+        {options.map((option:string)=><label className="multiOption" key={option}>
+          <input type="checkbox" checked={selected.includes(option)} onChange={()=>toggle(option)}/>
+          <span>{option}</span>
+        </label>)}
+      </div>
+    </details>
+  </div>
+}
+
 export default function Buyers(){
   const router=useRouter()
   const[buyers,setBuyers]=useState<any[]>([])
@@ -68,6 +106,7 @@ export default function Buyers(){
 
   async function saveBuyer(e:React.FormEvent){
     e.preventDefault();setBusy(true);setMsg('')
+    if(!split(f.districts).length){setMsg('Избери поне един район.');setBusy(false);return}
     const{data:{user}}=await supabase.auth.getUser();if(!user){setBusy(false);return}
     if(editing){
       const{error:be}=await supabase.from('buyers').update({full_name:f.full_name,phone:f.phone||null,email:f.email||null,notes:f.notes||null,updated_at:new Date().toISOString()}).eq('id',editing.id)
@@ -176,21 +215,27 @@ export default function Buyers(){
         <div className="field"><label>Телефон</label><input value={f.phone} onChange={e=>setF({...f,phone:e.target.value})}/></div>
         <div className="field"><label>Имейл</label><input type="email" value={f.email} onChange={e=>setF({...f,email:e.target.value})}/></div>
         <div className="field"><label>Сделка</label><select value={f.deal_type} onChange={e=>setF({...f,deal_type:e.target.value})}><option value="purchase">Покупка</option><option value="rent">Наем</option></select></div>
-        <div className="field full"><label>Типове имоти — раздели със запетая</label><input value={f.property_types} onChange={e=>setF({...f,property_types:e.target.value})} placeholder="3-стаен, 4-стаен"/></div>
-        <div className="field full"><label>Райони — раздели със запетая</label><input required value={f.districts} onChange={e=>setF({...f,districts:e.target.value})} placeholder="Изток, Изгрев"/></div>
+
+        <MultiSelect label="Тип имот" value={f.property_types} options={PROPERTY_TYPES} onChange={(v:string)=>setF({...f,property_types:v})} placeholder="Избери тип имот"/>
+        <MultiSelect label="Райони *" value={f.districts} options={DISTRICTS} onChange={(v:string)=>setF({...f,districts:v})} full placeholder="Избери един или няколко района"/>
+
         <div className="field"><label>Цена от (€)</label><input type="number" value={f.price_min} onChange={e=>setF({...f,price_min:e.target.value})}/></div>
         <div className="field"><label>Цена до (€)</label><input type="number" value={f.price_max} onChange={e=>setF({...f,price_max:e.target.value})}/></div>
         <div className="field"><label>Площ от (кв.м)</label><input type="number" value={f.area_min} onChange={e=>setF({...f,area_min:e.target.value})}/></div>
         <div className="field"><label>Площ до (кв.м)</label><input type="number" value={f.area_max} onChange={e=>setF({...f,area_max:e.target.value})}/></div>
-        <div className="field"><label>Минимум спални</label><input type="number" min="0" value={f.bedrooms_min} onChange={e=>setF({...f,bedrooms_min:e.target.value})}/></div>
-        <div className="field"><label>Година на строителство от</label><input type="number" min="1800" max="2100" value={f.year_min} onChange={e=>setF({...f,year_min:e.target.value})}/></div>
-        <div className="field"><label>Етаж от</label><input type="number" value={f.floor_min} onChange={e=>setF({...f,floor_min:e.target.value})}/></div>
-        <div className="field"><label>Етаж до</label><input type="number" value={f.floor_max} onChange={e=>setF({...f,floor_max:e.target.value})}/></div>
-        <div className="field full"><label>Строителство — раздели със запетая</label><input value={f.construction_types} onChange={e=>setF({...f,construction_types:e.target.value})} placeholder="Тухла, ЕПК"/></div>
+
+        <div className="field"><label>Минимум спални</label><select value={f.bedrooms_min} onChange={e=>setF({...f,bedrooms_min:e.target.value})}><option value="">Без значение</option>{[0,1,2,3,4,5].map(n=><option key={n} value={n}>{n===0?'Без минимум':`${n}+`}</option>)}</select></div>
+        <div className="field"><label>Година на строителство от</label><select value={f.year_min} onChange={e=>setF({...f,year_min:e.target.value})}><option value="">Без значение</option>{YEARS.map(y=><option key={y} value={y}>{y} г.</option>)}</select></div>
+        <div className="field"><label>Етаж от</label><select value={f.floor_min} onChange={e=>setF({...f,floor_min:e.target.value})}><option value="">Без значение</option>{FLOORS.map(n=><option key={n} value={n}>{n===0?'Партер':n}</option>)}</select></div>
+        <div className="field"><label>Етаж до</label><select value={f.floor_max} onChange={e=>setF({...f,floor_max:e.target.value})}><option value="">Без значение</option>{FLOORS.map(n=><option key={n} value={n}>{n===0?'Партер':n}</option>)}</select></div>
+
+        <MultiSelect label="Строителство" value={f.construction_types} options={CONSTRUCTION_TYPES} onChange={(v:string)=>setF({...f,construction_types:v})} full placeholder="Избери един или няколко вида"/>
+
         <div className="field"><label>Акт 16</label><select value={f.act16_level} onChange={e=>setF({...f,act16_level:e.target.value})}><option value="">Без значение</option><option value="required">Задължително</option><option value="preferred">Предпочитано</option></select></div>
         <div className="field"><label>Асансьор</label><select value={f.elevator_level} onChange={e=>setF({...f,elevator_level:e.target.value})}><option value="">Без значение</option><option value="required">Задължително</option><option value="preferred">Предпочитано</option></select></div>
         <div className="field"><label>Гараж / паркомясто</label><select value={f.parking_level} onChange={e=>setF({...f,parking_level:e.target.value})}><option value="">Без значение</option><option value="required">Задължително</option><option value="preferred">Предпочитано</option></select></div>
-        <div className="field"><label>Проверка при мониторинг (минути)</label><input type="number" min="5" value={f.monitoring_interval_minutes} onChange={e=>setF({...f,monitoring_interval_minutes:e.target.value})}/></div>
+        <div className="field"><label>Проверка при мониторинг</label><select value={f.monitoring_interval_minutes} onChange={e=>setF({...f,monitoring_interval_minutes:e.target.value})}>{MONITORING_OPTIONS.map(n=><option key={n} value={n}>{n<60?`${n} мин.`:n===60?'1 час':n<1440?`${n/60} часа`:'24 часа'}</option>)}</select></div>
+
         <div className="field full"><label>Допълнителни условия / бележки за имота</label><textarea value={f.free_text} onChange={e=>setF({...f,free_text:e.target.value})} placeholder="напр. южно изложение, тиха улица, близо до метро"/></div>
         <div className="field full"><label>Бележки за клиента</label><textarea value={f.notes} onChange={e=>setF({...f,notes:e.target.value})}/></div>
       </div>
