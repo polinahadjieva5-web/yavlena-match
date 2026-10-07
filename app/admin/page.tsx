@@ -56,7 +56,7 @@ export default function AdminPage(){
         return <div className="noticeRow" key={p.id}>
           {ok?<CheckCircle2 size={19}/>:isFirm?<LockKeyhole size={19}/>:<Clock3 size={19}/>}
           <div className="grow"><b>{p.portal_name}</b><div className="meta">{isFirm?'Фирмен профил / защитена сесия':'Публично автоматично търсене'}{p.last_success_at?` · Последна успешна проверка: ${new Date(p.last_success_at).toLocaleString('bg-BG')}`:''}</div>{isFirm&&<div className="meta">{p.portal_name==='Estate Assistant'?'Вход: app.estateassistant.eu/Account/Login':'Вход през фирмения профил на Imot.bg'}</div>}{p.last_error_message&&<div className="err">{p.last_error_message}</div>}</div>
-          <span className="tag">{ok?'Свързан':p.connection_status==='session_expired'?'Сесията е изтекла':isFirm?'Фирменият профил не е свързан':'Активен източник'}</span>
+          <span className="tag">{ok?'Свързан':p.connection_status==='session_expired'?'Сесията е изтекла':p.connection_status==='attention_required'?'Ограничен':isFirm?'Фирменият профил не е свързан':'Активен източник'}</span>
           <div className="rowActions">
             {p.base_url&&<a className="btn" href={p.base_url} target="_blank" rel="noreferrer">{isFirm?<><LogIn size={15}/>Вход във фирмения профил</>:<><ExternalLink size={15}/>Отвори</>}</a>}
             {isFirm&&<button className="btn" onClick={()=>checkFirmConnection(p)}><RefreshCw size={15}/>Провери връзката</button>}
