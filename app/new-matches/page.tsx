@@ -24,7 +24,9 @@ export default function Matches(){
     if(!user){router.replace('/login');return}
     const{data,error}=await supabase
       .from('offer_matches')
-      .select('*,buyers(full_name,buyer_searches(districts)),offers(*,offer_sources(name))')
+      .select('*,buyers(full_name,buyer_searches(districts)),offers!inner(*,offer_sources(name))')
+      .eq('is_current',true)
+      .eq('offers.is_active',true)
       .order('created_at',{ascending:false})
     if(error){setMsg(error.message);return}
     setRows((data||[]).filter(districtMatches))
@@ -50,7 +52,7 @@ export default function Matches(){
     <div className="topline"><div><div className="eyebrow">Купувач ↔ Нова оферта</div><h1>Нови съвпадения</h1><div className="subtitle">Всички оферти по критериите на купувача — частни лица, агенции и неуточнени податели. Районът трябва да съвпада точно.</div></div></div>
     {msg&&<div className={msg.startsWith('Съвпадението')?'ok':'err'} style={{marginBottom:14}}>{msg}</div>}
     <div className="listCard">{rows.length?rows.map(r=><div className="matchRow" key={r.id}>
-      <div className="score">100%</div>
+      <div className="score">100%</div><span className="pill private">Активна</span>
       <div className="grow"><b>{r.buyers?.full_name} — {r.offers?.title||r.offers?.property_type||'Оферта'}</b><div className="meta">{r.offers?.offer_sources?.name||'Източник'} · Район: {r.offers?.district||'—'} · {r.offers?.price_eur?`€${Number(r.offers.price_eur).toLocaleString('bg-BG')}`:'без цена'} · {r.offers?.area_sqm?`${r.offers.area_sqm} кв.м`:'без площ'}</div><div className="meta" style={{marginTop:7}}>{r.offers?.advertiser_type==='private'?'Частно лице':r.offers?.advertiser_type==='agency'?'Агенция':'Неуточнен подател'} · Районът е точно съвпаднал.</div></div>
       <div style={{display:'flex',gap:7,flexWrap:'wrap',justifyContent:'flex-end'}}>
         {r.offers?.original_url&&<a className="btn" target="_blank" rel="noreferrer" href={r.offers.original_url}><ExternalLink size={15}/>Линк</a>}
