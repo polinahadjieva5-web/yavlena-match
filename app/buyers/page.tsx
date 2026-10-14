@@ -187,7 +187,7 @@ export default function Buyers(){
     const out:any[]=[]
     const districts=s.districts||[]
     const types=s.property_types||[]
-    const endpoints=['/api/bazar-search','/api/homes-search','/api/imot-search']
+    const endpoints=['/api/bazar-search','/api/homes-search','/api/imot-search','/api/alo-search']
     for(const endpoint of endpoints){
       for(const district of districts){
         for(const propertyType of types){
