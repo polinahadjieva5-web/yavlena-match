@@ -184,17 +184,23 @@ export default function Buyers(){
 
   async function loadMatches(b:any){
     setSelected(b)
-    const{data:r,error}=await supabase
-      .from('offer_matches')
-      .select('id,score,status,created_at,is_current,offers!inner(*,offer_sources(name))')
-      .eq('buyer_id',b.id)
-      .eq('is_current',true)
-      .eq('offers.is_active',true)
-      .order('created_at',{ascending:false})
-      .limit(1000)
-    if(error){setMsg(`Не успях да заредя намерените оферти: ${error.message}`);setResults([]);return}
+    const all:any[]=[]
+    const pageSize=1000
+    for(let from=0;;from+=pageSize){
+      const{data,error}=await supabase
+        .from('offer_matches')
+        .select('id,score,status,created_at,is_current,offers!inner(*,offer_sources(name))')
+        .eq('buyer_id',b.id)
+        .eq('is_current',true)
+        .eq('offers.is_active',true)
+        .order('created_at',{ascending:false})
+        .range(from,from+pageSize-1)
+      if(error){setMsg(`Не успях да заредя намерените оферти: ${error.message}`);setResults([]);return}
+      all.push(...(data||[]))
+      if((data||[]).length<pageSize)break
+    }
     const seen=new Set<string>()
-    const unique=(r||[]).filter((x:any)=>{
+    const unique=all.filter((x:any)=>{
       const id=x.offers?.id
       if(!id||seen.has(id))return false
       seen.add(id)
