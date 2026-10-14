@@ -176,5 +176,5 @@ export async function GET(req: NextRequest) {
     new RegExp('[?&]page=' + (page + 1) + '(?:["&]|$)', 'i').test(html) ||
     (new RegExp('>\\s*' + (page + 1) + '\\s*<', 'i').test(html) && links.length > 0)
 
-  return NextResponse.json({ ok: true, source: 'ALO.bg', page, items, has_more: hasMore })
+  return NextResponse.json({ ok: true, source: 'ALO.bg', page, items, has_more: hasMore, page_signature: links.slice(0,8).join('|') })
 }
