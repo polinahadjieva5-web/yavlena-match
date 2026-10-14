@@ -1,6 +1,244 @@
-import {NextRequest,NextResponse} from 'next/server'
-export const runtime='nodejs'; export const dynamic='force-dynamic'; export const maxDuration=60
-const UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/154 Safari/537.36';const norm=(v:any)=>String(v||'').toLowerCase().replace(/\s+/g,' ').trim();const ts=(t:string)=>({'1-стаен':'ednostaen','2-стаен':'dvustaen','3-стаен':'tristaen','4-стаен':'chetiristaen','Многостаен':'mnogostaen','Мезонет':'mezonet','Къща':'kashta','Вила':'vila','Парцел':'partsel','Гараж':'garazh','Офис':'ofis','Магазин':'magazin'} as any)[t]||'';const tr=(s:string)=>{const m:Record<string,string>={'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ж':'zh','з':'z','и':'i','й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f','х':'h','ц':'ts','ч':'ch','ш':'sh','щ':'sht','ъ':'a','ь':'y','ю':'yu','я':'ya'};return norm(s).split('').map(x=>m[x]??x).join('').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}
-async function get(url:string){const c=new AbortController(),t=setTimeout(()=>c.abort(),12000);try{return await fetch(url,{headers:{'user-agent':UA,'accept-language':'bg-BG,bg;q=0.9','referer':'https://www.imot.bg/'},cache:'no-store',redirect:'follow',signal:c.signal})}finally{clearTimeout(t)}}async function txt(r:Response){const b=await r.arrayBuffer(),u=new TextDecoder().decode(b);if(/[А-Яа-я]/.test(u))return u;try{return new TextDecoder('windows-1251').decode(b)}catch{return u}}async function pool<T,R>(a:T[],l:number,fn:(x:T)=>Promise<R>){let i=0;const out:R[]=[];await Promise.all(Array.from({length:Math.min(l,a.length)},async()=>{while(true){const k=i++;if(k>=a.length)break;try{out[k]=await fn(a[k])}catch{}}}));return out.filter(Boolean)}
-function strip(h:string){return h.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;|&#160;|\u00a0/g,' ').replace(/\s+/g,' ').trim()}function build(t:string){const x=norm(t);if(x.includes('тухла'))return'Тухла';if(x.includes('панел'))return'Панел';if(x.includes('епк'))return'ЕПК';if(x.includes('гредоред'))return'Гредоред';return null}
-export async function GET(req:NextRequest){const q=req.nextUrl.searchParams,deal=q.get('deal')||'purchase',type=q.get('type')||'',district=q.get('district')||'',page=Math.max(1,Number(q.get('page')||1)),pmin=q.get('price_min')?Number(q.get('price_min')):null,pmax=q.get('price_max')?Number(q.get('price_max')):null,amin=q.get('area_min')?Number(q.get('area_min')):null,amax=q.get('area_max')?Number(q.get('area_max')):null,cons=(q.get('construction')||'').split(',').map(norm).filter(Boolean),slug=ts(type);if(!type||!district||!slug)return NextResponse.json({ok:true,source:'Imot.bg',page,items:[],has_more:false});const root='https://www.imot.bg/obiavi/'+(deal==='rent'?'naemi':'prodazhbi')+'/grad-sofiya/'+tr(district)+'/'+slug,url=root+(page>1?'/p-'+page:'');const r=await get(url);if(!r.ok)return NextResponse.json({ok:false,error:'Imot HTTP '+r.status,items:[],has_more:false});const html=await txt(r),links=[...new Set([...html.matchAll(/href=["'](\/\/www\.imot\.bg\/obiava-[^"']+)["']/gi)].map(m=>'https:'+m[1].split('#')[0]))];const items=await pool(links,8,async link=>{const rr=await get(link);if(!rr.ok)return null as any;const raw=await txt(rr),text=strip(raw);if(/обявата\s+(?:вече\s+)?(?:не\s+е\s+активна|е\s+изтрита|не\s+е\s+налична)/i.test(text))return null as any;const pm=raw.match(/showpricechange\([^)]*?'([0-9]{4,})','EUR'/i),pr=pm?Number(pm[1]):null;if(pmin!=null&&(pr==null||pr<pmin))return null as any;if(pmax!=null&&(pr==null||pr>pmax))return null as any;const am=text.match(/([0-9]+(?:[.,][0-9]+)?)\s*(?:m2|m²|кв\.?\s*м)/i),ar=am?Number(am[1].replace(',','.')):null;if(amin!=null&&(ar==null||ar<amin))return null as any;if(amax!=null&&(ar==null||ar>amax))return null as any;const b=build(text);if(cons.length&&b&&!cons.includes(norm(b)))return null as any;const dealer=raw.match(/<div class=["']dealer["'][\s\S]*?<\/div>\s*<\/div>/i)?.[0]||'',name=dealer.match(/<div class=["']name["']>([^<]+)<\/div>/i)?.[1]?.trim()||dealer.match(/href=["']https?:\/\/([^."]+)\.imot\.bg/i)?.[1]||null,at=dealer?'agency':'private',id=link.match(/obiava-([^-]+)/)?.[1]||link,title=(raw.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]||type+' · '+district).replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim();return{id:'imot:'+id,score:100,status:'new',created_at:new Date().toISOString(),offers:{id:'imot:'+id,title,original_url:link,property_type:type,deal_type:deal==='rent'?'rent':'sale',district,price_eur:pr,area_sqm:ar,construction_type:b,advertiser_type:at,advertiser_name:name,is_active:true,offer_sources:{name:'Imot.bg'}}}});const hasMore=html.includes('/p-'+(page+1))||new RegExp('Страница\\s+'+(page+1)+'\\b','i').test(html);return NextResponse.json({ok:true,source:'Imot.bg',page,items,has_more:hasMore,page_signature:links.slice(0,8).join('|')})}
+import { NextRequest, NextResponse } from 'next/server'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const maxDuration = 60
+
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/154 Safari/537.36'
+const norm = (v:any) => String(v || '').toLowerCase().replace(/\s+/g,' ').trim()
+
+const TYPE_SLUGS:Record<string,string>={
+  '1-стаен':'ednostaen','2-стаен':'dvustaen','3-стаен':'tristaen','4-стаен':'chetiristaen',
+  'Многостаен':'mnogostaen','Мезонет':'mezonet','Къща':'kashta','Вила':'vila',
+  'Парцел':'partsel','Гараж':'garazh','Офис':'ofis','Магазин':'magazin'
+}
+
+function translit(value:string){
+  const map:Record<string,string>={'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ж':'zh','з':'z','и':'i','й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f','х':'h','ц':'ts','ч':'ch','ш':'sh','щ':'sht','ъ':'a','ь':'y','ю':'yu','я':'ya'}
+  return norm(value).split('').map(x=>map[x]??x).join('').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')
+}
+
+async function get(url:string, timeout=12000){
+  const controller=new AbortController()
+  const timer=setTimeout(()=>controller.abort(),timeout)
+  try{
+    return await fetch(url,{
+      headers:{'user-agent':UA,'accept-language':'bg-BG,bg;q=0.9','referer':'https://www.imot.bg/'},
+      cache:'no-store',redirect:'follow',signal:controller.signal
+    })
+  }finally{clearTimeout(timer)}
+}
+
+async function readImot(response:Response){
+  const bytes=await response.arrayBuffer()
+  const utf=new TextDecoder().decode(bytes)
+  if(/[А-Яа-я]/.test(utf))return utf
+  try{return new TextDecoder('windows-1251').decode(bytes)}catch{return utf}
+}
+
+async function pool<T,R>(items:T[],limit:number,fn:(item:T)=>Promise<R>){
+  let cursor=0
+  const out:R[]=[]
+  await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{
+    while(true){
+      const index=cursor++
+      if(index>=items.length)break
+      try{out[index]=await fn(items[index])}catch{}
+    }
+  }))
+  return out.filter(Boolean)
+}
+
+function strip(html:string){
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi,' ')
+    .replace(/<style[\s\S]*?<\/style>/gi,' ')
+    .replace(/<[^>]+>/g,' ')
+    .replace(/&nbsp;|&#160;|\u00a0/g,' ')
+    .replace(/\s+/g,' ')
+    .trim()
+}
+
+function numberValue(value:string|undefined|null){
+  if(!value)return null
+  const cleaned=value.replace(/\u00a0/g,' ').replace(/[^0-9,.]/g,'').replace(',','.')
+  const n=Number(cleaned)
+  return Number.isFinite(n)?n:null
+}
+
+function cardPrice(snippet:string){
+  const patterns=[
+    /<div class=["']price[^"']*["'][^>]*>\s*<div[^>]*>\s*([0-9][0-9\s.]*)/i,
+    /([0-9][0-9\s.]*)\s*€/i,
+    /([0-9][0-9\s.]*)\s*EUR/i
+  ]
+  for(const re of patterns){
+    const m=snippet.match(re)
+    if(m){
+      const n=Number(m[1].replace(/[^0-9]/g,''))
+      if(Number.isFinite(n)&&n>=1000&&n<=50000000)return n
+    }
+  }
+  return null
+}
+
+function cardArea(snippet:string){
+  const matches=[...strip(snippet).matchAll(/([0-9]+(?:[.,][0-9]+)?)\s*(?:m2|m²|кв\.?\s*м)/gi)]
+    .map(m=>Number(m[1].replace(',','.')))
+    .filter(v=>v>=10&&v<=5000)
+  return matches.length?matches[0]:null
+}
+
+function construction(text:string){
+  const x=norm(text)
+  if(x.includes('тухла'))return'Тухла'
+  if(x.includes('панел'))return'Панел'
+  if(x.includes('епк'))return'ЕПК'
+  if(x.includes('гредоред'))return'Гредоред'
+  return null
+}
+
+export async function GET(req:NextRequest){
+  const q=req.nextUrl.searchParams
+  const deal=q.get('deal')||'purchase'
+  const propertyType=q.get('type')||''
+  const district=q.get('district')||''
+  const page=Math.max(1,Number(q.get('page')||1))
+  const priceMin=q.get('price_min')?Number(q.get('price_min')):null
+  const priceMax=q.get('price_max')?Number(q.get('price_max')):null
+  const areaMin=q.get('area_min')?Number(q.get('area_min')):null
+  const areaMax=q.get('area_max')?Number(q.get('area_max')):null
+  const wantedConstruction=(q.get('construction')||'').split(',').map(norm).filter(Boolean)
+
+  const typeSlug=TYPE_SLUGS[propertyType]||''
+  if(!propertyType||!district||!typeSlug){
+    return NextResponse.json({ok:true,source:'Imot.bg',page,items:[],has_more:false,raw_count:0})
+  }
+
+  const root='https://www.imot.bg/obiavi/'+(deal==='rent'?'naemi':'prodazhbi')+'/grad-sofiya/'+translit(district)+'/'+typeSlug
+  const listUrl=root+(page>1?'/p-'+page:'')
+  const listResponse=await get(listUrl)
+  if(!listResponse.ok){
+    return NextResponse.json({ok:false,error:'Imot HTTP '+listResponse.status,items:[],has_more:false,raw_count:0})
+  }
+
+  const html=await readImot(listResponse)
+  const rawLinks=[...html.matchAll(/href=["'](\/\/www\.imot\.bg\/obiava-[^"']+)["']/gi)]
+    .map(m=>'https:'+m[1].split('#')[0])
+  const links=[...new Set(rawLinks)]
+
+  const cards=links.map(link=>{
+    const protocolRelative=link.replace(/^https:/,'')
+    let pos=html.indexOf(protocolRelative)
+    if(pos<0)pos=html.indexOf(link)
+    const snippet=pos>=0?html.slice(Math.max(0,pos-1800),pos+5200):''
+    return {link,snippet,price:cardPrice(snippet),area:cardArea(snippet)}
+  }).filter(card=>{
+    if(priceMin!=null&&card.price!=null&&card.price<priceMin)return false
+    if(priceMax!=null&&card.price!=null&&card.price>priceMax)return false
+    if(areaMin!=null&&card.area!=null&&card.area<areaMin)return false
+    if(areaMax!=null&&card.area!=null&&card.area>areaMax)return false
+    return true
+  })
+
+  let detailSuccess=0
+  let listFallback=0
+
+  const items=await pool(cards,8,async card=>{
+    let raw=''
+    let text=''
+    let detailOk=false
+
+    try{
+      const detail=await get(card.link,10000)
+      if(detail.status===404||detail.status===410)return null as any
+      if(detail.ok){
+        raw=await readImot(detail)
+        text=strip(raw)
+        if(/обявата\s+(?:вече\s+)?(?:не\s+е\s+активна|е\s+изтрита|не\s+е\s+налична)/i.test(text))return null as any
+        detailOk=true
+        detailSuccess++
+      }
+    }catch{
+      detailOk=false
+    }
+
+    const detailPriceMatch=raw.match(/showpricechange\([^)]*?'([0-9]{4,})','EUR'/i)
+    const detailPrice=detailPriceMatch?Number(detailPriceMatch[1]):null
+    const effectivePrice=detailPrice??card.price
+
+    const detailAreas=text
+      ? [...text.matchAll(/([0-9]+(?:[.,][0-9]+)?)\s*(?:m2|m²|кв\.?\s*м)/gi)]
+          .map(m=>Number(m[1].replace(',','.')))
+          .filter(v=>v>=10&&v<=5000)
+      : []
+    const effectiveArea=detailAreas.length?detailAreas[0]:card.area
+
+    if(priceMin!=null&&(effectivePrice==null||effectivePrice<priceMin))return null as any
+    if(priceMax!=null&&(effectivePrice==null||effectivePrice>priceMax))return null as any
+    if(areaMin!=null&&(effectiveArea==null||effectiveArea<areaMin))return null as any
+    if(areaMax!=null&&(effectiveArea==null||effectiveArea>areaMax))return null as any
+
+    const build=detailOk?construction(text):null
+    if(wantedConstruction.length&&build&&!wantedConstruction.includes(norm(build)))return null as any
+
+    let advertiserType='unknown'
+    let advertiserName:string|null=null
+    if(detailOk){
+      const dealer=raw.match(/<div class=["']dealer["'][\s\S]*?<\/div>\s*<\/div>/i)?.[0]||''
+      advertiserName=
+        dealer.match(/<div class=["']name["']>([^<]+)<\/div>/i)?.[1]?.trim()||
+        dealer.match(/href=["']https?:\/\/([^."]+)\.imot\.bg/i)?.[1]||
+        null
+      advertiserType=dealer?'agency':'private'
+    }else{
+      listFallback++
+    }
+
+    const id=card.link.match(/obiava-([^-]+)/)?.[1]||card.link
+    const title=detailOk
+      ? (raw.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]||propertyType+' · '+district)
+          .replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim()
+      : propertyType+' · '+district
+
+    return {
+      id:'imot:'+id,
+      score:100,
+      status:'new',
+      created_at:new Date().toISOString(),
+      offers:{
+        id:'imot:'+id,
+        title,
+        original_url:card.link,
+        property_type:propertyType,
+        deal_type:deal==='rent'?'rent':'sale',
+        district,
+        price_eur:effectivePrice,
+        area_sqm:effectiveArea,
+        construction_type:build,
+        advertiser_type:advertiserType,
+        advertiser_name:advertiserName,
+        is_active:true,
+        offer_sources:{name:'Imot.bg'}
+      }
+    }
+  })
+
+  const hasMore=
+    html.includes('/p-'+(page+1)) ||
+    new RegExp('Страница\\s+'+(page+1)+'\\b','i').test(html) ||
+    new RegExp('href=["'][^"']*/p-'+(page+1)+'(?:["/?#])','i').test(html)
+
+  return NextResponse.json({
+    ok:true,
+    source:'Imot.bg',
+    page,
+    items,
+    has_more:hasMore,
+    raw_count:links.length,
+    candidate_count:cards.length,
+    detail_success:detailSuccess,
+    list_fallback:listFallback,
+    page_signature:links.slice(0,12).join('|')
+  })
+}
