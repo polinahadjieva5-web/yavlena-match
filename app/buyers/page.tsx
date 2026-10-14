@@ -199,12 +199,10 @@ export default function Buyers(){
     const seen=new Set<string>()
     setSearchProgress({done:0,total,label:'Стартирам публичните източници...'})
     await Promise.all(endpoints.map(async ep=>{
-      const sourceStarted=Date.now()
       for(const district of districts){
         for(const propertyType of types){
           let page=1,lastFingerprint=''
           while(true){
-            if(Date.now()-sourceStarted>180000)break
             setSearchProgress({done,total,label:`${ep.name} · ${district} · ${propertyType} · стр. ${page}`})
             const p=new URLSearchParams({deal:s.deal_type||'purchase',type:propertyType,district,page:String(page)})
             if(s.price_min!=null)p.set('price_min',String(s.price_min))
@@ -328,7 +326,7 @@ export default function Buyers(){
   }
 
   return <>
-    <div className="topline"><div><div className="eyebrow">Клиентски търсения</div><h1>Моите купувачи</h1><div className="subtitle">Подробни критерии, фирмени източници, история и постоянен мониторинг.</div></div><button className="btn primary" onClick={openCreate}><Plus size={17}/>Добави купувач</button></div>
+    <div className="topline"><div><div className="eyebrow">Клиентски търсения</div><h1>Моите купувачи</h1><div className="subtitle">Подробни критерии, фирмени източници, история и постоянен мониторинг. · Търсене v4</div></div><button className="btn primary" onClick={openCreate}><Plus size={17}/>Добави купувач</button></div>
     {searchInfo&&<div className="ok" style={{marginBottom:10}}>{searchInfo}</div>}
     {(searching||deepScanning)&&<div className="card" style={{marginBottom:14,padding:14}}>
       <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',alignItems:'center'}}>
