@@ -66,6 +66,10 @@ export default function Buyers(){
   const[selected,setSelected]=useState<any|null>(null)
   const[results,setResults]=useState<any[]>([])
   const[searchInfo,setSearchInfo]=useState('')
+  const[searchStartedAt,setSearchStartedAt]=useState<number|null>(null)
+  const[searchElapsed,setSearchElapsed]=useState(0)
+  const[searchEstimate,setSearchEstimate]=useState(45)
+  const[searchProgress,setSearchProgress]=useState({done:0,total:1,label:''})
 
   async function load(){
     const{data:{user}}=await supabase.auth.getUser()
@@ -74,6 +78,13 @@ export default function Buyers(){
     setBuyers(data||[])
   }
   useEffect(()=>{load()},[])
+  useEffect(()=>{
+    if(!searching||!searchStartedAt){setSearchElapsed(0);return}
+    const tick=()=>setSearchElapsed(Math.max(0,Math.floor((Date.now()-searchStartedAt)/1000)))
+    tick()
+    const id=window.setInterval(tick,1000)
+    return()=>window.clearInterval(id)
+  },[searching,searchStartedAt])
 
   function openCreate(){setEditing(null);setF(empty);setMsg('');setOpen(true)}
   function openEdit(b:any){
@@ -159,20 +170,107 @@ export default function Buyers(){
     return true
   }
 
+  function estimateSeconds(s:any){
+    const combos=Math.max(1,(s?.districts||[]).length)*Math.max(1,(s?.property_types||[]).length)
+    return Math.min(180,Math.max(30,25+combos*12))
+  }
+
+  function mergeResults(...groups:any[][]){
+    const out:any[]=[]
+    const seen=new Set<string>()
+    for(const group of groups)for(const r of group||[]){
+      const url=String(r?.offers?.original_url||'').split('#')[0].replace(/[?&](utm_[^=]+|fbclid)=[^&]+/g,'')
+      const key=url||String(r?.offers?.id||r?.id||'')
+      if(!key||seen.has(key))continue
+      seen.add(key);out.push(r)
+    }
+    return out
+  }
+
+  async function loadFallbackResults(s:any){
+    const endpoints=[
+      {path:'/api/bazar-search',name:'Bazar.bg'},
+      {path:'/api/homes-search',name:'Homes.bg'},
+      {path:'/api/imot-search',name:'Imot.bg'},
+      {path:'/api/alo-search',name:'ALO.bg'},
+      {path:'/api/yavlena-search',name:'Yavlena.com'},
+      {path:'/api/imotinet-search',name:'Imoti.net'},
+      {path:'/api/domaza-search',name:'Domaza'}
+    ]
+    const districts=s?.districts||[],types=s?.property_types||[]
+    const total=endpoints.length*Math.max(1,districts.length)*Math.max(1,types.length)
+    let done=0
+    const all:any[]=[]
+    const seen=new Set<string>()
+    setSearchProgress({done:0,total:Math.max(1,total),label:'Подготвям резервното търсене...'})
+    await Promise.all(endpoints.map(async ep=>{
+      for(const district of districts){
+        for(const propertyType of types){
+          let page=1,lastFingerprint=''
+          while(true){
+            setSearchProgress({done,total:Math.max(1,total),label:`${ep.name} · ${district} · ${propertyType} · стр. ${page}`})
+            const p=new URLSearchParams({deal:s.deal_type||'purchase',type:propertyType,district,page:String(page)})
+            if(s.price_min!=null)p.set('price_min',String(s.price_min))
+            if(s.price_max!=null)p.set('price_max',String(s.price_max))
+            if(s.area_min!=null)p.set('area_min',String(s.area_min))
+            if(s.area_max!=null)p.set('area_max',String(s.area_max))
+            if((s.construction_types||[]).length)p.set('construction',(s.construction_types||[]).join(','))
+            let data:any=null
+            try{
+              const r:any=await timed(fetch(ep.path+'?'+p.toString(),{cache:'no-store'}),22000,`${ep.name}`)
+              if(!r.ok)break
+              data=await r.json().catch(()=>null)
+            }catch{break}
+            if(!data?.ok)break
+            const items=data.items||[]
+            for(const item of items){
+              const key=String(item?.offers?.original_url||item?.offers?.id||item?.id||'').split('#')[0]
+              if(!key||seen.has(key))continue
+              seen.add(key);all.push(item)
+              setResults(prev=>mergeResults(prev,[item]))
+            }
+            const fingerprint=items.slice(0,5).map((x:any)=>x?.offers?.original_url||x?.offers?.id).join('|')
+            if(!data.has_more||!fingerprint||fingerprint===lastFingerprint)break
+            lastFingerprint=fingerprint
+            page++
+          }
+          done++
+          setSearchProgress({done,total:Math.max(1,total),label:`${ep.name} приключи за ${district} · ${propertyType}`})
+        }
+      }
+    }))
+    return all
+  }
+
   async function searchNow(b:any){
     const s=b.buyer_searches?.[0];if(!s)return
+    const started=Date.now()
     setSearching(b.id);setMsg('');setSelected(b);setResults([])
+    setSearchStartedAt(started);setSearchElapsed(0);setSearchEstimate(estimateSeconds(s))
     setSearchInfo(`Прилагам: ${(s.property_types||[]).join(', ')||'всички типове'} · ${(s.districts||[]).join(', ')||'всички райони'}${s.price_min?` · от €${Number(s.price_min).toLocaleString('bg-BG')}`:''}${s.price_max?` · до €${Number(s.price_max).toLocaleString('bg-BG')}`:''}${s.area_min?` · от ${s.area_min} кв.м`:''}${s.area_max?` · до ${s.area_max} кв.м`:''}`)
-    try{
-      const{data,error}:any=await timed(supabase.functions.invoke('portal-search',{body:{buyer_id:b.id,run_type:'manual'}}) as any,65000,'Търсенето')
-      if(error)setMsg(`Търсенето не успя: ${error.message}`)
-      else{
-        const details=(data?.portal_stats||[]).map((x:any)=>`${x.source}: ${x.count??0}`).join(' · ')
-        setMsg(`Готово: намерени ${data?.total||0} оферти${details?` · ${details}`:''}`)
-      }
-    }catch(e:any){setMsg(e.message||'Търсенето прекъсна.')}
-    await loadMatches(b)
-    setSearching(null);setSearchInfo('');await load()
+
+    let supData:any=null,supError:any=null,fallback:any[]=[]
+    const supTask=(async()=>{
+      try{
+        const{data,error}:any=await timed(supabase.functions.invoke('portal-search',{body:{buyer_id:b.id,run_type:'manual'}}) as any,52000,'Supabase търсенето')
+        if(error)supError=error;else supData=data
+      }catch(e:any){supError=e}
+    })()
+    const fallbackTask=(async()=>{try{fallback=await loadFallbackResults(s)}catch{fallback=[]}})()
+
+    await Promise.allSettled([supTask,fallbackTask])
+    const stored=await getStoredMatches(b)
+    const merged=mergeResults(stored,fallback)
+    setResults(merged)
+
+    const bySource=new Map<string,number>()
+    for(const r of merged){const name=r?.offers?.offer_sources?.name||'Друг';bySource.set(name,(bySource.get(name)||0)+1)}
+    const details=[...bySource.entries()].sort((a,b)=>b[1]-a[1]).map(([name,count])=>`${name}: ${count}`).join(' · ')
+    const secs=Math.max(1,Math.floor((Date.now()-started)/1000))
+    const supNote=supError?' · Supabase fallback активиран':''
+    setMsg(`Готово за ${secs} сек.: ${merged.length} активни оферти${supNote}${details?` · ${details}`:''}`)
+    setSearching(null);setSearchStartedAt(null);setSearchProgress({done:0,total:1,label:''});setSearchInfo('')
+    await load()
   }
 
   async function toggleMonitoring(b:any){
@@ -182,8 +280,7 @@ export default function Buyers(){
     await load()
   }
 
-  async function loadMatches(b:any){
-    setSelected(b)
+  async function getStoredMatches(b:any){
     const all:any[]=[]
     const pageSize=1000
     for(let from=0;;from+=pageSize){
@@ -195,18 +292,17 @@ export default function Buyers(){
         .eq('offers.is_active',true)
         .order('created_at',{ascending:false})
         .range(from,from+pageSize-1)
-      if(error){setMsg(`Не успях да заредя намерените оферти: ${error.message}`);setResults([]);return}
+      if(error){setMsg(`Не успях да заредя намерените оферти: ${error.message}`);return []}
       all.push(...(data||[]))
       if((data||[]).length<pageSize)break
     }
-    const seen=new Set<string>()
-    const unique=all.filter((x:any)=>{
-      const id=x.offers?.id
-      if(!id||seen.has(id))return false
-      seen.add(id)
-      return true
-    })
-    setResults(unique)
+    return mergeResults(all)
+  }
+
+  async function loadMatches(b:any){
+    setSelected(b)
+    const stored=await getStoredMatches(b)
+    setResults(stored)
   }
 
   async function openResults(b:any){
@@ -216,6 +312,14 @@ export default function Buyers(){
   return <>
     <div className="topline"><div><div className="eyebrow">Клиентски търсения</div><h1>Моите купувачи</h1><div className="subtitle">Подробни критерии, фирмени източници, история и постоянен мониторинг.</div></div><button className="btn primary" onClick={openCreate}><Plus size={17}/>Добави купувач</button></div>
     {searchInfo&&<div className="ok" style={{marginBottom:10}}>{searchInfo}</div>}
+    {searching&&<div className="card" style={{marginBottom:14,padding:14}}>
+      <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',alignItems:'center'}}>
+        <b>Търсенето върви...</b>
+        <span className="tag">{searchElapsed} сек. · {searchElapsed<searchEstimate?`остават ~${searchEstimate-searchElapsed} сек.`:'довършвам последните източници'}</span>
+      </div>
+      <progress value={Math.min(searchProgress.done,searchProgress.total)} max={Math.max(1,searchProgress.total)} style={{width:'100%',marginTop:10}}/>
+      <div className="meta" style={{marginTop:7}}>{searchProgress.label||'Supabase + резервни публични източници'} · {searchProgress.done}/{searchProgress.total} проверки</div>
+    </div>}
     {msg&&<div className={msg.startsWith('Готово')?'ok':'err'} style={{marginBottom:14}}>{msg}</div>}
 
     <div className="listCard">
