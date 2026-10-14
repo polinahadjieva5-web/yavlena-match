@@ -68,6 +68,7 @@ export default function Buyers(){
   const[searchInfo,setSearchInfo]=useState('')
   const[searchProgress,setSearchProgress]=useState({done:0,total:7,label:''})
   const[deepScanning,setDeepScanning]=useState(false)
+  const[sourceStatus,setSourceStatus]=useState('')
 
   async function load(){
     const{data:{user}}=await supabase.auth.getUser()
@@ -249,14 +250,16 @@ export default function Buyers(){
     setSearchInfo(`Прилагам: ${(s.property_types||[]).join(', ')||'всички типове'} · ${(s.districts||[]).join(', ')||'всички райони'}${s.price_min?` · от €${Number(s.price_min).toLocaleString('bg-BG')}`:''}${s.price_max?` · до €${Number(s.price_max).toLocaleString('bg-BG')}`:''}${s.area_min?` · от ${s.area_min} кв.м`:''}${s.area_max?` · до ${s.area_max} кв.м`:''}`)
 
     let supError:any=null
+    let supData:any=null
     const supTask=(async()=>{
       try{
-        const{error}:any=await timed(
+        const{data,error}:any=await timed(
           supabase.functions.invoke('portal-search',{body:{buyer_id:b.id,run_type:'manual'}}) as any,
           52000,
           'Supabase търсенето'
         )
         if(error)supError=error
+        else supData=data
       }catch(e:any){supError=e}
       const stored=await getStoredMatches(b)
       setResults(prev=>mergeResults(prev,stored))
@@ -279,6 +282,17 @@ export default function Buyers(){
     const stored=await getStoredMatches(b)
     setResults(prev=>mergeResults(prev,stored))
 
+    const stats=supData?.portal_stats||supData?.sources||supData?.stats||null
+    if(stats&&typeof stats==='object'){
+      const entries=Array.isArray(stats)
+        ? stats.map((x:any)=>[x?.name||x?.source||'Източник',x?.count??x?.total??x?.found??0])
+        : Object.entries(stats).map(([k,v]:any)=>[k,typeof v==='object'?(v?.count??v?.total??v?.found??0):v])
+      const interesting=entries.filter(([name]:any)=>/estate|imot/i.test(String(name)))
+      setSourceStatus(interesting.length?interesting.map(([name,count]:any)=>`${name}: ${count}`).join(' · '):'Supabase не върна отделна статистика за Estate / Imot firm.')
+    }else{
+      setSourceStatus(supError?'Supabase firm източниците не отговориха успешно.':'Supabase не върна отделна статистика за Estate / Imot firm.')
+    }
+
     const secs=Math.max(1,Math.floor((Date.now()-started)/1000))
     if(finished){
       setMsg(`Готово за ${secs} сек. Резултатите от всички приключили източници са показани.`)
@@ -297,6 +311,31 @@ export default function Buyers(){
     await load()
   }
 
+  async function validateStoredFirmResults(rows:any[]){
+    const targets=rows.filter((r:any)=>{
+      const source=String(r?.offers?.offer_sources?.name||'').toLowerCase()
+      return source.includes('estate')||source.includes('imot')
+    })
+    const urls=[...new Set(targets.map((r:any)=>r?.offers?.original_url).filter(Boolean))]
+    if(!urls.length)return rows
+    const inactive=new Set<string>()
+    for(let i=0;i<urls.length;i+=50){
+      try{
+        const r=await fetch('/api/validate-active',{
+          method:'POST',
+          headers:{'content-type':'application/json'},
+          body:JSON.stringify({urls:urls.slice(i,i+50)})
+        })
+        if(!r.ok)continue
+        const data=await r.json().catch(()=>null)
+        for(const item of data?.results||[]){
+          if(item?.status==='inactive')inactive.add(item.url)
+        }
+      }catch{}
+    }
+    return rows.filter((r:any)=>!inactive.has(r?.offers?.original_url))
+  }
+
   async function getStoredMatches(b:any){
     const all:any[]=[]
     const pageSize=1000
@@ -313,7 +352,8 @@ export default function Buyers(){
       all.push(...(data||[]))
       if((data||[]).length<pageSize)break
     }
-    return mergeResults(all)
+    const merged=mergeResults(all)
+    return await validateStoredFirmResults(merged)
   }
 
   async function loadMatches(b:any){
@@ -340,6 +380,7 @@ export default function Buyers(){
       {deepScanning&&!searching&&<div className="meta" style={{marginTop:4}}>Можеш да работиш със сайта — допълнителните страници се проверяват без да блокират екрана.</div>}
     </div>}
     {msg&&<div className={msg.startsWith('Готово')?'ok':'err'} style={{marginBottom:14}}>{msg}</div>}
+    {sourceStatus&&<div className="meta" style={{margin:'-4px 0 14px'}}>Фирмени източници: {sourceStatus}</div>}
 
     <div className="listCard">
       {buyers.length?buyers.map(b=>{const s=b.buyer_searches?.[0];return <div className="buyerBlock" key={b.id}>
