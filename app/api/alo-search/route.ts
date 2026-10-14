@@ -111,53 +111,78 @@ export async function GET(req: NextRequest) {
     return decoded.startsWith('/' + typeSlug + '-sofiya-' + districtSlug + '-') && /-\d{5,}(?:#|$)/.test(decoded)
   }).map(href => 'https://www.alo.bg' + href.split('#')[0]))]
 
-  const items = await pool(links, 8, async link => {
-    const detail = await get(link)
-    if (!detail.ok) return null as any
-
-    const raw = await detail.text()
-    const text = strip(raw)
-    if (/обявата\s+(?:вече\s+)?(?:не\s+е\s+активна|е\s+изтрита|не\s+е\s+налична)/i.test(text)) return null as any
-
+  const cards = links.map(link => {
     const urlParts = link.match(/-([0-9]+(?:-[0-9]+)?)-kv-m-([0-9]+)-([0-9]+)$/i)
-    const areaMatch = text.match(/([0-9]+(?:[.,][0-9]+)?)\s*кв\.?\s*м/i)
-    const priceMatch = text.match(/([0-9][0-9\s.]*)\s*(?:EUR|€)/i)
+    const area = urlParts ? Number(urlParts[1].replace('-', '.')) : null
+    const price = urlParts ? Number(urlParts[2]) : null
+    const id = urlParts?.[3] || link.match(/-(\d{5,})$/)?.[1] || link
+    return { link, area, price, id }
+  }).filter(card => {
+    if (priceMin != null && card.price != null && card.price < priceMin) return false
+    if (priceMax != null && card.price != null && card.price > priceMax) return false
+    if (areaMin != null && card.area != null && card.area < areaMin) return false
+    if (areaMax != null && card.area != null && card.area > areaMax) return false
+    return true
+  })
 
-    const area = urlParts
-      ? Number(urlParts[1].replace('-', '.'))
-      : areaMatch ? Number(areaMatch[1].replace(',', '.')) : null
+  let detailSuccess = 0
+  let listFallback = 0
 
-    const price = urlParts
-      ? Number(urlParts[2])
-      : priceMatch ? Number(priceMatch[1].replace(/[^0-9]/g, '')) : null
+  const items = await pool(cards, 8, async card => {
+    let raw = ''
+    let text = ''
+    let detailOk = false
+
+    try {
+      const detail = await get(card.link)
+      if (detail.status === 404 || detail.status === 410) return null as any
+      if (detail.ok) {
+        raw = await detail.text()
+        text = strip(raw)
+        if (/обявата\s+(?:вече\s+)?(?:не\s+е\s+активна|е\s+изтрита|не\s+е\s+налична)/i.test(text)) return null as any
+        detailOk = true
+        detailSuccess++
+      }
+    } catch {}
+
+    const areaMatch = detailOk ? text.match(/([0-9]+(?:[.,][0-9]+)?)\s*кв\.?\s*м/i) : null
+    const priceMatch = detailOk ? text.match(/([0-9][0-9\s.]*)\s*(?:EUR|€)/i) : null
+    const area = card.area ?? (areaMatch ? Number(areaMatch[1].replace(',', '.')) : null)
+    const price = card.price ?? (priceMatch ? Number(priceMatch[1].replace(/[^0-9]/g, '')) : null)
 
     if (priceMin != null && (price == null || price < priceMin)) return null as any
     if (priceMax != null && (price == null || price > priceMax)) return null as any
     if (areaMin != null && (area == null || area < areaMin)) return null as any
     if (areaMax != null && (area == null || area > areaMax)) return null as any
 
-    const build = construction(text)
+    const build = detailOk ? construction(text) : null
     if (wantedConstruction.length && build && !wantedConstruction.includes(norm(build))) return null as any
 
-    const lower = norm(text)
-    const advertiserType =
-      /(частно лице|от собственик|собственик продава|директно от собственик|без агенция|без посредник)/i.test(lower)
-        ? 'private'
-        : /(агенция|брокер|недвижими имоти)/i.test(lower) ? 'agency' : 'unknown'
+    let advertiserType = 'unknown'
+    if (detailOk) {
+      const lower = norm(text)
+      advertiserType =
+        /(частно лице|от собственик|собственик продава|директно от собственик|без агенция|без посредник)/i.test(lower)
+          ? 'private'
+          : /(агенция|брокер|недвижими имоти)/i.test(lower) ? 'agency' : 'unknown'
+    } else {
+      listFallback++
+    }
 
-    const id = link.match(/-(\d{5,})$/)?.[1] || link
-    const title = (raw.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || propertyType + ' · ' + district)
-      .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    const title = detailOk
+      ? (raw.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || propertyType + ' · ' + district)
+          .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      : propertyType + ' · ' + district
 
     return {
-      id: 'alo:' + id,
+      id: 'alo:' + card.id,
       score: 100,
       status: 'new',
       created_at: new Date().toISOString(),
       offers: {
-        id: 'alo:' + id,
+        id: 'alo:' + card.id,
         title,
-        original_url: link,
+        original_url: card.link,
         property_type: propertyType,
         deal_type: deal === 'rent' ? 'rent' : 'sale',
         district,
@@ -176,5 +201,5 @@ export async function GET(req: NextRequest) {
     new RegExp('[?&]page=' + (page + 1) + '(?:["&]|$)', 'i').test(html) ||
     (new RegExp('>\\s*' + (page + 1) + '\\s*<', 'i').test(html) && links.length > 0)
 
-  return NextResponse.json({ ok: true, source: 'ALO.bg', page, items, has_more: hasMore, page_signature: links.slice(0,8).join('|') })
+  return NextResponse.json({ ok: true, source: 'ALO.bg', page, items, has_more: hasMore, raw_count: links.length, candidate_count: cards.length, detail_success: detailSuccess, list_fallback: listFallback, page_signature: links.slice(0,12).join('|') })
 }
