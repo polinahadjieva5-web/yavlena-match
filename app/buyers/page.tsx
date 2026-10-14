@@ -229,7 +229,7 @@ export default function Buyers(){
               seen.add(key);all.push(item)
               setResults(prev=>mergeResults(prev,[item]))
             }
-            const fingerprint=items.slice(0,5).map((x:any)=>x?.offers?.original_url||x?.offers?.id).join('|')
+            const fingerprint=String(data.page_signature||items.slice(0,5).map((x:any)=>x?.offers?.original_url||x?.offers?.id).join('|'))
             if(!data.has_more)break
             if(data.page!=null&&Number(data.page)!==page)break
             if(fingerprint&&fingerprint===lastFingerprint)break
