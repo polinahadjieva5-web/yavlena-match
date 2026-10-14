@@ -182,42 +182,6 @@ export default function Buyers(){
     await load()
   }
 
-  async function loadLivePublic(s:any){
-    if(!s)return []
-    const out:any[]=[]
-    const districts=s.districts||[]
-    const types=s.property_types||[]
-    const endpoints=['/api/bazar-search','/api/homes-search','/api/imot-search','/api/alo-search']
-    for(const endpoint of endpoints){
-      for(const district of districts){
-        for(const propertyType of types){
-          let page=1
-          while(true){
-            const p=new URLSearchParams({
-              deal:s.deal_type||'purchase',
-              type:propertyType,
-              district,
-              page:String(page)
-            })
-            if(s.price_min!=null)p.set('price_min',String(s.price_min))
-            if(s.price_max!=null)p.set('price_max',String(s.price_max))
-            if(s.area_min!=null)p.set('area_min',String(s.area_min))
-            if(s.area_max!=null)p.set('area_max',String(s.area_max))
-            if((s.construction_types||[]).length)p.set('construction',(s.construction_types||[]).join(','))
-            const r=await fetch(endpoint+'?'+p.toString(),{cache:'no-store'})
-            if(!r.ok)break
-            const data=await r.json().catch(()=>null)
-            if(!data?.ok)break
-            out.push(...(data.items||[]))
-            if(!data.has_more)break
-            page++
-          }
-        }
-      }
-    }
-    return out
-  }
-
   async function loadMatches(b:any){
     setSelected(b)
     const all:any[]=[]
@@ -235,23 +199,14 @@ export default function Buyers(){
       all.push(...(data||[]))
       if((data||[]).length<pageSize)break
     }
-    const seenDb=new Set<string>()
+    const seen=new Set<string>()
     const unique=all.filter((x:any)=>{
       const id=x.offers?.id
-      if(!id||seenDb.has(id))return false
-      seenDb.add(id)
+      if(!id||seen.has(id))return false
+      seen.add(id)
       return true
     })
-    let live:any[]=[]
-    try{live=await loadLivePublic(b.buyer_searches?.[0])}catch{}
-    const seen=new Set<string>()
-    const merged=[...unique,...live].filter((x:any)=>{
-      const key=x.offers?.original_url||x.offers?.id||x.id
-      if(!key||seen.has(key))return false
-      seen.add(key)
-      return true
-    })
-    setResults(merged)
+    setResults(unique)
   }
 
   async function openResults(b:any){
