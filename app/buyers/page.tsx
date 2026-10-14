@@ -68,7 +68,8 @@ export default function Buyers(){
   const[searchInfo,setSearchInfo]=useState('')
   const[searchStartedAt,setSearchStartedAt]=useState<number|null>(null)
   const[searchElapsed,setSearchElapsed]=useState(0)
-  const[searchProgress,setSearchProgress]=useState({done:0,total:1,label:''})
+  const[searchProgress,setSearchProgress]=useState({done:0,total:7,label:''})
+  const[deepScanning,setDeepScanning]=useState(false)
 
   async function load(){
     const{data:{user}}=await supabase.auth.getUser()
@@ -198,11 +199,13 @@ export default function Buyers(){
     const seen=new Set<string>()
     setSearchProgress({done:0,total,label:'Стартирам публичните източници...'})
     await Promise.all(endpoints.map(async ep=>{
+      const sourceStarted=Date.now()
       for(const district of districts){
         for(const propertyType of types){
           let page=1,lastFingerprint=''
           while(true){
-            setSearchProgress({done,total:Math.max(1,total),label:`${ep.name} · ${district} · ${propertyType} · стр. ${page}`})
+            if(Date.now()-sourceStarted>180000)break
+            setSearchProgress({done,total,label:`${ep.name} · ${district} · ${propertyType} · стр. ${page}`})
             const p=new URLSearchParams({deal:s.deal_type||'purchase',type:propertyType,district,page:String(page)})
             if(s.price_min!=null)p.set('price_min',String(s.price_min))
             if(s.price_max!=null)p.set('price_max',String(s.price_max))
@@ -241,32 +244,51 @@ export default function Buyers(){
   async function searchNow(b:any){
     const s=b.buyer_searches?.[0];if(!s)return
     const started=Date.now()
-    setSearching(b.id);setMsg('');setSelected(b);setResults([])
+    setSearching(b.id);setDeepScanning(true);setMsg('');setSelected(b);setResults([])
     setSearchStartedAt(started);setSearchElapsed(0)
+    setSearchProgress({done:0,total:7,label:'Стартирам всички източници...'})
     setSearchInfo(`Прилагам: ${(s.property_types||[]).join(', ')||'всички типове'} · ${(s.districts||[]).join(', ')||'всички райони'}${s.price_min?` · от €${Number(s.price_min).toLocaleString('bg-BG')}`:''}${s.price_max?` · до €${Number(s.price_max).toLocaleString('bg-BG')}`:''}${s.area_min?` · от ${s.area_min} кв.м`:''}${s.area_max?` · до ${s.area_max} кв.м`:''}`)
 
-    let supData:any=null,supError:any=null,fallback:any[]=[]
+    let supError:any=null
     const supTask=(async()=>{
       try{
-        const{data,error}:any=await timed(supabase.functions.invoke('portal-search',{body:{buyer_id:b.id,run_type:'manual'}}) as any,52000,'Supabase търсенето')
-        if(error)supError=error;else supData=data
+        const{error}:any=await timed(
+          supabase.functions.invoke('portal-search',{body:{buyer_id:b.id,run_type:'manual'}}) as any,
+          52000,
+          'Supabase търсенето'
+        )
+        if(error)supError=error
       }catch(e:any){supError=e}
+      const stored=await getStoredMatches(b)
+      setResults(prev=>mergeResults(prev,stored))
     })()
-    const fallbackTask=(async()=>{try{fallback=await loadFallbackResults(s)}catch{fallback=[]}})()
 
-    await Promise.allSettled([supTask,fallbackTask])
+    const fallbackTask=(async()=>{
+      try{
+        const fallback=await loadFallbackResults(s)
+        setResults(prev=>mergeResults(prev,fallback))
+      }catch{}
+      finally{setDeepScanning(false)}
+    })()
+
+    const foreground=Promise.allSettled([supTask,fallbackTask])
+    const finished=await Promise.race([
+      foreground.then(()=>true),
+      new Promise<boolean>(resolve=>setTimeout(()=>resolve(false),75000))
+    ])
+
     const stored=await getStoredMatches(b)
-    const merged=mergeResults(stored,fallback)
-    setResults(merged)
+    setResults(prev=>mergeResults(prev,stored))
 
-    const bySource=new Map<string,number>()
-    for(const r of merged){const name=r?.offers?.offer_sources?.name||'Друг';bySource.set(name,(bySource.get(name)||0)+1)}
-    const details=[...bySource.entries()].sort((a,b)=>b[1]-a[1]).map(([name,count])=>`${name}: ${count}`).join(' · ')
     const secs=Math.max(1,Math.floor((Date.now()-started)/1000))
-    const supNote=supError?' · Supabase fallback активиран':''
-    setMsg(`Готово за ${secs} сек.: ${merged.length} активни оферти${supNote}${details?` · ${details}`:''}`)
-    setSearching(null);setSearchStartedAt(null);setSearchProgress({done:0,total:1,label:''});setSearchInfo('')
-    await load()
+    if(finished){
+      setMsg(`Готово за ${secs} сек. Резултатите от всички приключили източници са показани.`)
+      setDeepScanning(false)
+    }else{
+      setMsg(`Първите резултати са готови за ${secs} сек. Бавните източници продължават да добавят оферти, без да блокират работата.`)
+    }
+    if(supError)setMsg(prev=>prev+` Supabase не отговори напълно и резервното търсене е поело публичните сайтове.`)
+    setSearching(null);setSearchStartedAt(null);setSearchInfo('')
   }
 
   async function toggleMonitoring(b:any){
@@ -308,15 +330,15 @@ export default function Buyers(){
   return <>
     <div className="topline"><div><div className="eyebrow">Клиентски търсения</div><h1>Моите купувачи</h1><div className="subtitle">Подробни критерии, фирмени източници, история и постоянен мониторинг.</div></div><button className="btn primary" onClick={openCreate}><Plus size={17}/>Добави купувач</button></div>
     {searchInfo&&<div className="ok" style={{marginBottom:10}}>{searchInfo}</div>}
-    {searching&&<div className="card" style={{marginBottom:14,padding:14}}>
+    {(searching||deepScanning)&&<div className="card" style={{marginBottom:14,padding:14}}>
       <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',alignItems:'center'}}>
-        <b>Търся оферти...</b>
-        <span className="tag">Изминало време: {searchElapsed} сек.</span>
+        <b>{searching?'Търся оферти...':'Допълвам още оферти...'}</b>
+        {searching&&<span className="tag">Изминало време: {searchElapsed} сек.</span>}
       </div>
-      <progress value={Math.min(searchProgress.done,searchProgress.total)} max={Math.max(1,searchProgress.total)} style={{width:'100%',marginTop:10}}/>
-      <div className="meta" style={{marginTop:7}}>Публични източници: {searchProgress.done}/{searchProgress.total} приключили</div>
+      <div className="meta" style={{marginTop:8}}>Приключили публични източници: {searchProgress.done} от 7</div>
       <div className="meta" style={{marginTop:4}}>В момента: {searchProgress.label||'Supabase и публичните източници работят паралелно'}</div>
       <div className="meta" style={{marginTop:4}}>Намерени досега: {results.length} оферти</div>
+      {deepScanning&&!searching&&<div className="meta" style={{marginTop:4}}>Можеш да работиш със сайта — допълнителните страници се проверяват без да блокират екрана.</div>}
     </div>}
     {msg&&<div className={msg.startsWith('Готово')?'ok':'err'} style={{marginBottom:14}}>{msg}</div>}
 
