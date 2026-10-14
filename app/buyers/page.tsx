@@ -230,8 +230,10 @@ export default function Buyers(){
               setResults(prev=>mergeResults(prev,[item]))
             }
             const fingerprint=items.slice(0,5).map((x:any)=>x?.offers?.original_url||x?.offers?.id).join('|')
-            if(!data.has_more||!fingerprint||fingerprint===lastFingerprint)break
-            lastFingerprint=fingerprint
+            if(!data.has_more)break
+            if(data.page!=null&&Number(data.page)!==page)break
+            if(fingerprint&&fingerprint===lastFingerprint)break
+            if(fingerprint)lastFingerprint=fingerprint
             page++
           }
           done++
