@@ -22,14 +22,21 @@ export default function Matches(){
   async function load(){
     const{data:{user}}=await supabase.auth.getUser()
     if(!user){router.replace('/login');return}
-    const{data,error}=await supabase
-      .from('offer_matches')
-      .select('*,buyers(full_name,buyer_searches(districts)),offers!inner(*,offer_sources(name))')
-      .eq('is_current',true)
-      .eq('offers.is_active',true)
-      .order('created_at',{ascending:false})
-    if(error){setMsg(error.message);return}
-    setRows((data||[]).filter(districtMatches))
+    const all:any[]=[]
+    const pageSize=1000
+    for(let from=0;;from+=pageSize){
+      const{data,error}=await supabase
+        .from('offer_matches')
+        .select('*,buyers(full_name,buyer_searches(districts)),offers!inner(*,offer_sources(name))')
+        .eq('is_current',true)
+        .eq('offers.is_active',true)
+        .order('created_at',{ascending:false})
+        .range(from,from+pageSize-1)
+      if(error){setMsg(error.message);return}
+      all.push(...(data||[]))
+      if((data||[]).length<pageSize)break
+    }
+    setRows(all.filter(districtMatches))
   }
 
   useEffect(()=>{load()},[])
