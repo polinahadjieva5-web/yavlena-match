@@ -182,6 +182,39 @@ export default function Buyers(){
     await load()
   }
 
+  async function loadLiveBazar(s:any){
+    if(!s)return []
+    const out:any[]=[]
+    const districts=s.districts||[]
+    const types=s.property_types||[]
+    for(const district of districts){
+      for(const propertyType of types){
+        let page=1
+        while(true){
+          const p=new URLSearchParams({
+            deal:s.deal_type||'purchase',
+            type:propertyType,
+            district,
+            page:String(page)
+          })
+          if(s.price_min!=null)p.set('price_min',String(s.price_min))
+          if(s.price_max!=null)p.set('price_max',String(s.price_max))
+          if(s.area_min!=null)p.set('area_min',String(s.area_min))
+          if(s.area_max!=null)p.set('area_max',String(s.area_max))
+          if((s.construction_types||[]).length)p.set('construction',(s.construction_types||[]).join(','))
+          const r=await fetch('/api/bazar-search?'+p.toString(),{cache:'no-store'})
+          if(!r.ok)break
+          const data=await r.json().catch(()=>null)
+          if(!data?.ok)break
+          out.push(...(data.items||[]))
+          if(!data.has_more)break
+          page++
+        }
+      }
+    }
+    return out
+  }
+
   async function loadMatches(b:any){
     setSelected(b)
     const all:any[]=[]
@@ -199,14 +232,23 @@ export default function Buyers(){
       all.push(...(data||[]))
       if((data||[]).length<pageSize)break
     }
-    const seen=new Set<string>()
+    const seenDb=new Set<string>()
     const unique=all.filter((x:any)=>{
       const id=x.offers?.id
-      if(!id||seen.has(id))return false
-      seen.add(id)
+      if(!id||seenDb.has(id))return false
+      seenDb.add(id)
       return true
     })
-    setResults(unique)
+    let live:any[]=[]
+    try{live=await loadLiveBazar(b.buyer_searches?.[0])}catch{}
+    const seen=new Set<string>()
+    const merged=[...unique,...live].filter((x:any)=>{
+      const key=x.offers?.original_url||x.offers?.id||x.id
+      if(!key||seen.has(key))return false
+      seen.add(key)
+      return true
+    })
+    setResults(merged)
   }
 
   async function openResults(b:any){
@@ -225,7 +267,7 @@ export default function Buyers(){
       </div>}):<div className="empty" style={{margin:'14px 0'}}>Няма добавени купувачи.</div>}
     </div>
 
-    {selected&&<div className="card resultsCard"><div className="toolbar"><div><h2 style={{margin:0}}>Оферти за {selected.full_name}</h2><div className="meta">Показват се всички намерени оферти по критериите на купувача — от частни лица, агенции и неуточнени податели. Районът е задължителен.</div></div><button className="btn" onClick={()=>setSelected(null)}>Скрий</button></div>
+    {selected&&<div className="card resultsCard"><div className="toolbar"><div><h2 style={{margin:0}}>Оферти за {selected.full_name}</h2><div className="meta">Показват се всички намерени оферти по критериите на купувача — без лимит на броя. Районът е задължителен.</div><div className="meta" style={{marginTop:5}}>Общо: {results.length} · Частни: {results.filter((r:any)=>r.offers?.advertiser_type==='private').length} · Агенции: {results.filter((r:any)=>r.offers?.advertiser_type==='agency').length} · Неуточнени: {results.filter((r:any)=>!['private','agency'].includes(r.offers?.advertiser_type)).length}</div></div><button className="btn" onClick={()=>setSelected(null)}>Скрий</button></div>
       {results.length?results.sort((a,b)=>new Date(b.offers?.source_published_at||b.created_at).getTime()-new Date(a.offers?.source_published_at||a.created_at).getTime()).map(r=><div className="offerResult" key={r.id}><div className="grow"><div className="offerTop"><b>{r.offers?.title||'Имотна оферта'}</b><span className="pill private">Активна</span><span className={r.offers?.advertiser_type==='private'?'pill private':r.offers?.advertiser_type==='agency'?'pill agency':'pill'}>{r.offers?.advertiser_type==='private'?'Частно лице':r.offers?.advertiser_type==='agency'?'Агенция':'Неуточнен подател'}</span></div><div className="meta">{r.offers?.offer_sources?.name||'Източник'}{r.offers?.advertiser_name?` · Подател: ${r.offers.advertiser_name}`:''} · {r.offers?.district||'—'} · {r.offers?.price_eur?`€${Number(r.offers.price_eur).toLocaleString('bg-BG')}`:'без цена'}{r.offers?.area_sqm?` · ${r.offers.area_sqm} кв.м`:''}{r.offers?.floor!=null?` · ет. ${r.offers.floor}`:''}{r.offers?.construction_type?` · ${r.offers.construction_type}`:''} · съвпадение 100% · {r.offers?.source_published_at?new Date(r.offers.source_published_at).toLocaleString('bg-BG'):'открита при последната проверка'}</div></div>{r.offers?.original_url&&<a className="btn" href={r.offers.original_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Отвори</a>}</div>):<div className="empty">Няма оферти, които да покриват текущите критерии.</div>}
     </div>}
 
