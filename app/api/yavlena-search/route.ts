@@ -84,5 +84,5 @@ export async function GET(req:NextRequest){
   }
 
   const hasMore=items.length>=45||new RegExp('[?&]page='+(page+1)+'(?:["&]|$)','i').test(html)
-  return NextResponse.json({ok:true,source:'Yavlena.com',page,items,has_more:hasMore})
+  return NextResponse.json({ok:true,source:'Yavlena.com',page,items,has_more:hasMore,page_signature:items.slice(0,8).map((x:any)=>x.offers?.original_url||x.id).join('|')})
 }
