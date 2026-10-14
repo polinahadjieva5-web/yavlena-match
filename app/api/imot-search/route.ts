@@ -226,8 +226,7 @@ export async function GET(req:NextRequest){
 
   const hasMore=
     html.includes('/p-'+(page+1)) ||
-    new RegExp('Страница\\s+'+(page+1)+'\\b','i').test(html) ||
-    new RegExp('href=["'][^"']*/p-'+(page+1)+'(?:["/?#])','i').test(html)
+    new RegExp('Страница\\s+'+(page+1)+'\\b','i').test(html)
 
   return NextResponse.json({
     ok:true,
