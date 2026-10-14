@@ -68,7 +68,6 @@ export default function Buyers(){
   const[searchInfo,setSearchInfo]=useState('')
   const[searchStartedAt,setSearchStartedAt]=useState<number|null>(null)
   const[searchElapsed,setSearchElapsed]=useState(0)
-  const[searchEstimate,setSearchEstimate]=useState(45)
   const[searchProgress,setSearchProgress]=useState({done:0,total:1,label:''})
 
   async function load(){
@@ -170,11 +169,6 @@ export default function Buyers(){
     return true
   }
 
-  function estimateSeconds(s:any){
-    const combos=Math.max(1,(s?.districts||[]).length)*Math.max(1,(s?.property_types||[]).length)
-    return Math.min(180,Math.max(30,25+combos*12))
-  }
-
   function mergeResults(...groups:any[][]){
     const out:any[]=[]
     const seen=new Set<string>()
@@ -198,11 +192,11 @@ export default function Buyers(){
       {path:'/api/domaza-search',name:'Domaza'}
     ]
     const districts=s?.districts||[],types=s?.property_types||[]
-    const total=endpoints.length*Math.max(1,districts.length)*Math.max(1,types.length)
+    const total=endpoints.length
     let done=0
     const all:any[]=[]
     const seen=new Set<string>()
-    setSearchProgress({done:0,total:Math.max(1,total),label:'Подготвям резервното търсене...'})
+    setSearchProgress({done:0,total,label:'Стартирам публичните източници...'})
     await Promise.all(endpoints.map(async ep=>{
       for(const district of districts){
         for(const propertyType of types){
@@ -236,10 +230,10 @@ export default function Buyers(){
             if(fingerprint)lastFingerprint=fingerprint
             page++
           }
-          done++
-          setSearchProgress({done,total:Math.max(1,total),label:`${ep.name} приключи за ${district} · ${propertyType}`})
         }
       }
+      done++
+      setSearchProgress({done,total,label:`${ep.name} приключи`})
     }))
     return all
   }
@@ -248,7 +242,7 @@ export default function Buyers(){
     const s=b.buyer_searches?.[0];if(!s)return
     const started=Date.now()
     setSearching(b.id);setMsg('');setSelected(b);setResults([])
-    setSearchStartedAt(started);setSearchElapsed(0);setSearchEstimate(estimateSeconds(s))
+    setSearchStartedAt(started);setSearchElapsed(0)
     setSearchInfo(`Прилагам: ${(s.property_types||[]).join(', ')||'всички типове'} · ${(s.districts||[]).join(', ')||'всички райони'}${s.price_min?` · от €${Number(s.price_min).toLocaleString('bg-BG')}`:''}${s.price_max?` · до €${Number(s.price_max).toLocaleString('bg-BG')}`:''}${s.area_min?` · от ${s.area_min} кв.м`:''}${s.area_max?` · до ${s.area_max} кв.м`:''}`)
 
     let supData:any=null,supError:any=null,fallback:any[]=[]
@@ -316,11 +310,13 @@ export default function Buyers(){
     {searchInfo&&<div className="ok" style={{marginBottom:10}}>{searchInfo}</div>}
     {searching&&<div className="card" style={{marginBottom:14,padding:14}}>
       <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',alignItems:'center'}}>
-        <b>Търсенето върви...</b>
-        <span className="tag">{searchElapsed} сек. · {searchElapsed<searchEstimate?`остават ~${searchEstimate-searchElapsed} сек.`:'довършвам последните източници'}</span>
+        <b>Търся оферти...</b>
+        <span className="tag">Изминало време: {searchElapsed} сек.</span>
       </div>
       <progress value={Math.min(searchProgress.done,searchProgress.total)} max={Math.max(1,searchProgress.total)} style={{width:'100%',marginTop:10}}/>
-      <div className="meta" style={{marginTop:7}}>{searchProgress.label||'Supabase + резервни публични източници'} · {searchProgress.done}/{searchProgress.total} проверки</div>
+      <div className="meta" style={{marginTop:7}}>Публични източници: {searchProgress.done}/{searchProgress.total} приключили</div>
+      <div className="meta" style={{marginTop:4}}>В момента: {searchProgress.label||'Supabase и публичните източници работят паралелно'}</div>
+      <div className="meta" style={{marginTop:4}}>Намерени досега: {results.length} оферти</div>
     </div>}
     {msg&&<div className={msg.startsWith('Готово')?'ok':'err'} style={{marginBottom:14}}>{msg}</div>}
 
