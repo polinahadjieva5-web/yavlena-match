@@ -66,8 +66,6 @@ export default function Buyers(){
   const[selected,setSelected]=useState<any|null>(null)
   const[results,setResults]=useState<any[]>([])
   const[searchInfo,setSearchInfo]=useState('')
-  const[searchStartedAt,setSearchStartedAt]=useState<number|null>(null)
-  const[searchElapsed,setSearchElapsed]=useState(0)
   const[searchProgress,setSearchProgress]=useState({done:0,total:7,label:''})
   const[deepScanning,setDeepScanning]=useState(false)
 
@@ -78,13 +76,6 @@ export default function Buyers(){
     setBuyers(data||[])
   }
   useEffect(()=>{load()},[])
-  useEffect(()=>{
-    if(!searching||!searchStartedAt){setSearchElapsed(0);return}
-    const tick=()=>setSearchElapsed(Math.max(0,Math.floor((Date.now()-searchStartedAt)/1000)))
-    tick()
-    const id=window.setInterval(tick,1000)
-    return()=>window.clearInterval(id)
-  },[searching,searchStartedAt])
 
   function openCreate(){setEditing(null);setF(empty);setMsg('');setOpen(true)}
   function openEdit(b:any){
@@ -182,6 +173,18 @@ export default function Buyers(){
     return out
   }
 
+  async function fetchPortalPage(url:string,label:string){
+    let lastError:any=null
+    for(let attempt=1;attempt<=3;attempt++){
+      try{
+        const r:any=await timed(fetch(url,{cache:'no-store'}),55000,`${label} · опит ${attempt}`)
+        if(r.ok)return r
+        lastError=new Error(`${label} HTTP ${r.status}`)
+      }catch(e:any){lastError=e}
+    }
+    throw lastError||new Error(`${label} не отговори.`)
+  }
+
   async function loadFallbackResults(s:any){
     const endpoints=[
       {path:'/api/bazar-search',name:'Bazar.bg'},
@@ -212,8 +215,7 @@ export default function Buyers(){
             if((s.construction_types||[]).length)p.set('construction',(s.construction_types||[]).join(','))
             let data:any=null
             try{
-              const r:any=await timed(fetch(ep.path+'?'+p.toString(),{cache:'no-store'}),22000,`${ep.name}`)
-              if(!r.ok)break
+              const r:any=await fetchPortalPage(ep.path+'?'+p.toString(),ep.name)
               data=await r.json().catch(()=>null)
             }catch{break}
             if(!data?.ok)break
@@ -243,7 +245,6 @@ export default function Buyers(){
     const s=b.buyer_searches?.[0];if(!s)return
     const started=Date.now()
     setSearching(b.id);setDeepScanning(true);setMsg('');setSelected(b);setResults([])
-    setSearchStartedAt(started);setSearchElapsed(0)
     setSearchProgress({done:0,total:7,label:'Стартирам всички източници...'})
     setSearchInfo(`Прилагам: ${(s.property_types||[]).join(', ')||'всички типове'} · ${(s.districts||[]).join(', ')||'всички райони'}${s.price_min?` · от €${Number(s.price_min).toLocaleString('bg-BG')}`:''}${s.price_max?` · до €${Number(s.price_max).toLocaleString('bg-BG')}`:''}${s.area_min?` · от ${s.area_min} кв.м`:''}${s.area_max?` · до ${s.area_max} кв.м`:''}`)
 
@@ -286,7 +287,7 @@ export default function Buyers(){
       setMsg(`Първите резултати са готови за ${secs} сек. Бавните източници продължават да добавят оферти, без да блокират работата.`)
     }
     if(supError)setMsg(prev=>prev+` Supabase не отговори напълно и резервното търсене е поело публичните сайтове.`)
-    setSearching(null);setSearchStartedAt(null);setSearchInfo('')
+    setSearching(null);setSearchInfo('')
   }
 
   async function toggleMonitoring(b:any){
@@ -331,7 +332,7 @@ export default function Buyers(){
     {(searching||deepScanning)&&<div className="card" style={{marginBottom:14,padding:14}}>
       <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',alignItems:'center'}}>
         <b>{searching?'Търся оферти...':'Допълвам още оферти...'}</b>
-        {searching&&<span className="tag">Изминало време: {searchElapsed} сек.</span>}
+        <span className="tag">Търсене v4 · без лимит на офертите</span>
       </div>
       <div className="meta" style={{marginTop:8}}>Приключили публични източници: {searchProgress.done} от 7</div>
       <div className="meta" style={{marginTop:4}}>В момента: {searchProgress.label||'Supabase и публичните източници работят паралелно'}</div>
