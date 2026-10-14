@@ -21,18 +21,25 @@ function translit(value: string) {
 }
 
 async function get(url: string) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 12000)
-  try {
-    return await fetch(url, {
-      headers: { 'user-agent': UA, 'accept-language': 'bg-BG,bg;q=0.9' },
-      cache: 'no-store',
-      redirect: 'follow',
-      signal: controller.signal
-    })
-  } finally {
-    clearTimeout(timer)
+  let lastError: any = null
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 12000)
+    try {
+      return await fetch(url, {
+        headers: { 'user-agent': UA, 'accept-language': 'bg-BG,bg;q=0.9' },
+        cache: 'no-store',
+        redirect: 'follow',
+        signal: controller.signal
+      })
+    } catch (e:any) {
+      lastError = e
+      if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 350 * attempt))
+    } finally {
+      clearTimeout(timer)
+    }
   }
+  throw lastError || new Error('ALO fetch failed')
 }
 
 async function pool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>) {
