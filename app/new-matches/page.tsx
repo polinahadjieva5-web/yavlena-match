@@ -54,22 +54,19 @@ export default function Matches(){
   }
 
   async function validateActiveRows(input:any[]){
-    const urls=[...new Set(input.map((r:any)=>r?.offers?.original_url).filter(Boolean))]
-    if(!urls.length)return []
-    const statusMap=new Map<string,string>()
-    for(let i=0;i<urls.length;i+=50){
+    const ids=[...new Set(input.map((r:any)=>r?.offers?.id).filter(Boolean))]
+    if(!ids.length)return []
+    const activeIds=new Set<string>()
+    for(let i=0;i<ids.length;i+=100){
       try{
-        const res=await fetch('/api/validate-active',{
-          method:'POST',
-          headers:{'content-type':'application/json'},
-          body:JSON.stringify({urls:urls.slice(i,i+50)})
+        const {data,error}:any=await supabase.functions.invoke('validate-offer-links',{
+          body:{offer_ids:ids.slice(i,i+100)}
         })
-        if(!res.ok)continue
-        const data=await res.json().catch(()=>null)
-        for(const item of data?.results||[])if(item?.url)statusMap.set(item.url,item.status||'unknown')
+        if(error)continue
+        for(const item of data?.results||[])if(item?.status==='active'&&item?.id)activeIds.add(String(item.id))
       }catch{}
     }
-    return input.filter((r:any)=>statusMap.get(r?.offers?.original_url)==='active')
+    return input.filter((r:any)=>activeIds.has(String(r?.offers?.id||'')))
   }
 
   async function load(){
