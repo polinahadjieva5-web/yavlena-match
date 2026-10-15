@@ -76,7 +76,7 @@ export async function GET(req:NextRequest){
     let advertiserType='unknown'
     if(detailOk){
       const l=norm(text)
-      advertiserType=/частно лице|собственик/i.test(l)?'private':/(агенция|брокер|недвижими имоти)/i.test(l)?'agency':'unknown'
+      advertiserType=/(?:агенция(?:та)?\s+(?:за\s+недвижими\s+имоти\s+)?(?:предлага|представя|продава|отдава)|брокер(?:ът)?\s+(?:предлага|представя)|нашата\s+агенция|оферта\s+на\s+агенция)/i.test(l)?'agency':/(?:аз\s+съм\s+собственик|собственик\s+съм|собственик\s+(?:продава|отдава)|(?:директно|лично)\s+от\s+собственик|(?:продавам|отдавам)\s+лично|частно\s+лице\s+(?:продава|отдава))/i.test(l)?'private':'unknown'
     }else listFallback++
 
     const id=card.link.match(/\/([0-9]{5,})(?:\?|$)/)?.[1]||card.link
