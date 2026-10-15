@@ -209,6 +209,7 @@ export async function GET(req:NextRequest){
       offers:{
         id:'imot:'+id,
         title,
+        description:detailOk?text.slice(0,6000):null,
         original_url:card.link,
         property_type:propertyType,
         deal_type:deal==='rent'?'rent':'sale',
