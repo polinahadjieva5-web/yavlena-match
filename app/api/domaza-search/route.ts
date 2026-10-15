@@ -137,6 +137,7 @@ export async function GET(req:NextRequest){
       offers:{
         id:'domaza:'+id,
         title,
+        description:text.slice(0,6000),
         original_url:link,
         property_type:propertyType,
         deal_type:deal==='rent'?'rent':'sale',
