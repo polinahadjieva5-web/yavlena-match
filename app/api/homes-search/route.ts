@@ -134,7 +134,7 @@ export async function GET(req:NextRequest){
     }else listFallback++
 
     const id=card.link.match(/\/([^/]+)$/)?.[1]||card.link
-    return{id:'homes:'+id,score:100,status:'new',created_at:new Date().toISOString(),offers:{id:'homes:'+id,title:title||type+' · '+district,original_url:card.link,property_type:type,deal_type:deal==='rent'?'rent':'sale',district,price_eur:pr,area_sqm:ar,construction_type:build,advertiser_type:advertiserType,advertiser_name:advertiserName,is_active:true,offer_sources:{name:'Homes.bg'}}}
+    return{id:'homes:'+id,score:100,status:'new',created_at:new Date().toISOString(),offers:{id:'homes:'+id,title:title||type+' · '+district,description:detailOk?raw.replace(/<[^>]+>/g,' ').replace(/\\s+/g,' ').trim().slice(0,6000):null,original_url:card.link,property_type:type,deal_type:deal==='rent'?'rent':'sale',district,price_eur:pr,area_sqm:ar,construction_type:build,advertiser_type:advertiserType,advertiser_name:advertiserName,is_active:true,offer_sources:{name:'Homes.bg'}}}
   })
 
   const hasMore=new RegExp('[?&]page='+(page+1)+'(?:["&]|$)','i').test(html)||new RegExp('>\\s*'+(page+1)+'\\s*<','i').test(html)&&links.length>0
