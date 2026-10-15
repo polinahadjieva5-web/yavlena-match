@@ -372,26 +372,20 @@ export default function Buyers(){
   }
 
   async function validateStoredFirmResults(rows:any[]){
-    const targets=rows.filter((r:any)=>Boolean(r?.offers?.original_url))
-    const urls=[...new Set(targets.map((r:any)=>r?.offers?.original_url).filter(Boolean))]
-    if(!urls.length)return []
-    const statusMap=new Map<string,string>()
-    for(let i=0;i<urls.length;i+=50){
+    const ids=[...new Set(rows.map((r:any)=>r?.offers?.id).filter(Boolean))]
+    if(!ids.length)return []
+    const activeIds=new Set<string>()
+    for(let i=0;i<ids.length;i+=100){
       try{
-        const r=await fetch('/api/validate-active',{
-          method:'POST',
-          headers:{'content-type':'application/json'},
-          body:JSON.stringify({urls:urls.slice(i,i+50)})
+        const {data,error}:any=await supabase.functions.invoke('validate-offer-links',{
+          body:{offer_ids:ids.slice(i,i+100)}
         })
-        if(!r.ok)continue
-        const data=await r.json().catch(()=>null)
-        for(const item of data?.results||[]){
-          if(item?.url)statusMap.set(item.url,item.status||'unknown')
-        }
+        if(error)continue
+        for(const item of data?.results||[])if(item?.status==='active'&&item?.id)activeIds.add(String(item.id))
       }catch{}
     }
     return rows
-      .filter((r:any)=>statusMap.get(r?.offers?.original_url)==='active')
+      .filter((r:any)=>activeIds.has(String(r?.offers?.id||'')))
       .map((r:any)=>({...r,_active_validation:'active'}))
   }
 
