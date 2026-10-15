@@ -128,8 +128,8 @@ export async function GET(req:NextRequest){
       const agency=raw.match(/"agency"\s*:\s*\{[\s\S]{0,900}?"name"\s*:\s*"([^"]+)"/i)
       const broker=raw.match(/"broker"\s*:\s*\{[\s\S]{0,500}?"name"\s*:\s*"([^"]+)"/i)
       const text=raw.replace(/<[^>]+>/g,' ')
-      const priv=/частно лице|от собственик|собственик продава/i.test(text)
-      advertiserType=agency?'agency':priv?'private':'unknown'
+      const priv=/(?:аз\s+съм\s+собственик|собственик\s+съм|собственик\s+(?:продава|отдава)|(?:директно|лично)\s+от\s+собственик|(?:продавам|отдавам)\s+лично|частно\s+лице\s+(?:продава|отдава))/i.test(text)
+      advertiserType=agency||broker?'agency':priv?'private':'unknown'
       advertiserName=agency?.[1]||broker?.[1]||null
     }else listFallback++
 
