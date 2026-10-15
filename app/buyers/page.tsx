@@ -16,6 +16,42 @@ const split=(v:string)=>v.split(',').map(s=>s.trim()).filter(Boolean)
 const numOrNull=(v:any)=>v===''||v===null||v===undefined?null:Number(v)
 const norm=(v:any)=>String(v||'').toLowerCase().trim()
 
+function normalizeDescriptionForDedupe(value:any){
+  const text=String(value||'')
+    .toLowerCase()
+    .replace(/<[^>]+>/g,' ')
+    .replace(/https?:\/\/\S+/g,' ')
+    .replace(/\+?[0-9][0-9 ()+.-]{6,}[0-9]/g,' ')
+    .replace(/\b[0-9]+(?:[.,][0-9]+)?\b/g,' # ')
+    .replace(/[^\p{L}\s#]/gu,' ')
+    .replace(/\s+/g,' ')
+    .trim()
+  const words=text.split(' ').filter(Boolean)
+  if(text.length<120||words.length<18)return''
+  return text
+}
+
+function duplicateDescriptionKey(r:any){
+  const o=r?.offers||{}
+  const description=normalizeDescriptionForDedupe(o.description)
+  if(!description)return''
+  return [norm(o.property_type),norm(o.district),description].join('|')
+}
+
+function offerVariant(r:any){
+  const o=r?.offers||{}
+  return{
+    id:o.id||r?.id,
+    url:o.original_url||'',
+    source:o.offer_sources?.name||'Източник',
+    price:o.price_eur??null,
+    area:o.area_sqm??null,
+    advertiser_type:o.advertiser_type||'unknown',
+    advertiser_name:o.advertiser_name||null
+  }
+}
+
+
 const PROPERTY_TYPES=['1-стаен','2-стаен','3-стаен','4-стаен','Многостаен','Мезонет','Ателие / студио','Къща','Вила','Парцел','Гараж','Офис','Магазин']
 const DISTRICTS=[
   '7-ми 11-ти километър','Абдовица','Банишора','Белите брези','Бенковски','Борово','Бояна','Бъкстон','Витоша','Военна рампа',
@@ -164,12 +200,38 @@ export default function Buyers(){
 
   function mergeResults(...groups:any[][]){
     const out:any[]=[]
-    const seen=new Set<string>()
+    const byUrl=new Map<string,any>()
+    const byDescription=new Map<string,any>()
+
+    const addVariant=(target:any,variant:any)=>{
+      const current=Array.isArray(target._variants)?target._variants:[offerVariant(target)]
+      if(!current.some((v:any)=>v.url&&variant.url&&v.url===variant.url)){
+        target._variants=[...current,variant]
+      }else target._variants=current
+      target._duplicateCount=target._variants.length
+      if(target.offers?.advertiser_type==='unknown'&&variant.advertiser_type!=='unknown'){
+        target.offers={...target.offers,advertiser_type:variant.advertiser_type,advertiser_name:variant.advertiser_name||target.offers?.advertiser_name}
+      }
+    }
+
     for(const group of groups)for(const r of group||[]){
       const url=String(r?.offers?.original_url||'').split('#')[0].replace(/[?&](utm_[^=]+|fbclid)=[^&]+/g,'')
-      const key=url||String(r?.offers?.id||r?.id||'')
-      if(!key||seen.has(key))continue
-      seen.add(key);out.push(r)
+      const urlKey=url||String(r?.offers?.id||r?.id||'')
+      const descKey=duplicateDescriptionKey(r)
+      const existing=(descKey&&byDescription.get(descKey))||(urlKey&&byUrl.get(urlKey))
+
+      if(existing){
+        const incomingVariants=Array.isArray(r._variants)&&r._variants.length?r._variants:[offerVariant(r)]
+        for(const variant of incomingVariants)addVariant(existing,variant)
+        if(urlKey)byUrl.set(urlKey,existing)
+        if(descKey)byDescription.set(descKey,existing)
+        continue
+      }
+
+      const item={...r,_variants:Array.isArray(r._variants)&&r._variants.length?r._variants:[offerVariant(r)],_duplicateCount:Array.isArray(r._variants)&&r._variants.length?r._variants.length:1}
+      out.push(item)
+      if(urlKey)byUrl.set(urlKey,item)
+      if(descKey)byDescription.set(descKey,item)
     }
     return out
   }
@@ -392,7 +454,7 @@ export default function Buyers(){
     </div>
 
     {selected&&<div className="card resultsCard"><div className="toolbar"><div><h2 style={{margin:0}}>Оферти за {selected.full_name}</h2><div className="meta">Показват се всички намерени оферти по критериите на купувача — без лимит на броя. Районът е задължителен.</div><div className="meta" style={{marginTop:5}}>Общо: {results.length} · Частни: {results.filter((r:any)=>r.offers?.advertiser_type==='private').length} · Агенции: {results.filter((r:any)=>r.offers?.advertiser_type==='agency').length} · Неуточнени: {results.filter((r:any)=>!['private','agency'].includes(r.offers?.advertiser_type)).length}</div></div><button className="btn" onClick={()=>setSelected(null)}>Скрий</button></div>
-      {results.length?results.sort((a,b)=>new Date(b.offers?.source_published_at||b.created_at).getTime()-new Date(a.offers?.source_published_at||a.created_at).getTime()).map(r=><div className="offerResult" key={r.id}><div className="grow"><div className="offerTop"><b>{r.offers?.title||'Имотна оферта'}</b><span className="pill private">{r._active_validation==='active'?'Потвърдена активна':r._active_validation==='unknown'?'Активна според източника':'Активна'}</span><span className={r.offers?.advertiser_type==='private'?'pill private':r.offers?.advertiser_type==='agency'?'pill agency':'pill'}>{r.offers?.advertiser_type==='private'?'Частно лице':r.offers?.advertiser_type==='agency'?'Агенция':'Неуточнен подател'}</span></div><div className="meta">{r.offers?.offer_sources?.name||'Източник'}{r.offers?.advertiser_name?` · Подател: ${r.offers.advertiser_name}`:''} · {r.offers?.district||'—'} · {r.offers?.price_eur?`€${Number(r.offers.price_eur).toLocaleString('bg-BG')}`:'без цена'}{r.offers?.area_sqm?` · ${r.offers.area_sqm} кв.м`:''}{r.offers?.floor!=null?` · ет. ${r.offers.floor}`:''}{r.offers?.construction_type?` · ${r.offers.construction_type}`:''} · съвпадение 100% · {r.offers?.source_published_at?new Date(r.offers.source_published_at).toLocaleString('bg-BG'):'открита при последната проверка'}</div></div>{r.offers?.original_url&&<a className="btn" href={r.offers.original_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Отвори</a>}</div>):<div className="empty">Няма оферти, които да покриват текущите критерии.</div>}
+      {results.length?results.sort((a,b)=>new Date(b.offers?.source_published_at||b.created_at).getTime()-new Date(a.offers?.source_published_at||a.created_at).getTime()).map(r=>{const variants=Array.isArray(r._variants)&&r._variants.length?r._variants:[offerVariant(r)];return <div className="offerResult" key={r.id}><div className="grow"><div className="offerTop"><b>{r.offers?.title||'Имотна оферта'}</b><span className="pill private">{r._active_validation==='active'?'Потвърдена активна':r._active_validation==='unknown'?'Активна според източника':'Активна'}</span><span className={r.offers?.advertiser_type==='private'?'pill private':r.offers?.advertiser_type==='agency'?'pill agency':'pill'}>{r.offers?.advertiser_type==='private'?'Частно лице':r.offers?.advertiser_type==='agency'?'Агенция':'Неуточнен подател'}</span>{variants.length>1&&<span className="tag">{variants.length} публикации на същия имот</span>}</div><div className="meta">{r.offers?.offer_sources?.name||'Източник'}{r.offers?.advertiser_name?` · Подател: ${r.offers.advertiser_name}`:''} · {r.offers?.district||'—'} · {r.offers?.price_eur?`€${Number(r.offers.price_eur).toLocaleString('bg-BG')}`:'без цена'}{r.offers?.area_sqm?` · ${r.offers.area_sqm} кв.м`:''}{r.offers?.floor!=null?` · ет. ${r.offers.floor}`:''}{r.offers?.construction_type?` · ${r.offers.construction_type}`:''} · съвпадение 100% · {r.offers?.source_published_at?new Date(r.offers.source_published_at).toLocaleString('bg-BG'):'открита при последната проверка'}</div>{variants.length>1&&<div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:8}}>{variants.map((v:any,i:number)=>v.url?<a key={v.url||i} className="btn" href={v.url} target="_blank" rel="noreferrer">{v.source}{v.price?` · €${Number(v.price).toLocaleString('bg-BG')}`:''}{v.area?` · ${v.area} кв.м`:''}</a>:null)}</div>}</div>{variants.length===1&&r.offers?.original_url&&<a className="btn" href={r.offers.original_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Отвори</a>}</div>}):<div className="empty">Няма оферти, които да покриват текущите критерии.</div>}
     </div>}
 
     {open&&<div className="modalBack"><form className="modal" onSubmit={saveBuyer}><div className="modalHead"><div><div className="eyebrow">{editing?'Редакция на клиент':'Нов клиент'}</div><h2 style={{margin:'4px 0'}}>Подробни критерии за търсене</h2></div><button type="button" className="x" onClick={()=>setOpen(false)}><X size={18}/></button></div>
