@@ -12,13 +12,26 @@ const ALLOWED=[
 ]
 
 function inactiveText(text:string){
-  const t=text.toLowerCase().replace(/\s+/g,' ')
-  return [
-    'обявата вече не е активна','обявата не е активна','обявата е изтрита','обявата не е налична',
-    'тази обява вече не е активна','тази обява е изтрита','офертата е неактивна',
-    'inactive listing','listing is no longer available','listing has expired','offer expired',
-    'неактивна оферта','изтекла обява','изтекла оферта'
-  ].some(x=>t.includes(x))
+  const t=text.toLowerCase().replace(/\s+/g,' ').trim()
+  const patterns=[
+    /обявата.{0,100}вече\s+не\s+е\s+активна/i,
+    /обявата.{0,100}не\s+е\s+активна/i,
+    /тази\s+обява.{0,100}не\s+е\s+активна/i,
+    /обявата.{0,100}е\s+изтрита/i,
+    /обявата.{0,100}е\s+свалена/i,
+    /обявата.{0,100}не\s+е\s+налична/i,
+    /офертата.{0,100}не\s+е\s+активна/i,
+    /офертата.{0,100}е\s+изтекла/i,
+    /неактивна\s+обява/i,
+    /неактивна\s+оферта/i,
+    /изтекла\s+обява/i,
+    /изтекла\s+оферта/i,
+    /listing\s+is\s+no\s+longer\s+available/i,
+    /ad\s+is\s+no\s+longer\s+available/i,
+    /listing\s+has\s+expired/i,
+    /offer\s+expired/i
+  ]
+  return patterns.some(re=>re.test(t))
 }
 
 async function check(url:string){
