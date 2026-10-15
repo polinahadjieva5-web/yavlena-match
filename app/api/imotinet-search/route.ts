@@ -82,7 +82,7 @@ export async function GET(req:NextRequest){
     const id=card.link.match(/\/([0-9]{5,})(?:\?|$)/)?.[1]||card.link
     const title=detailOk?(raw.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]||type+' · '+district).replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim():type+' · '+district
 
-    return{id:'imotinet:'+id,score:100,status:'new',created_at:new Date().toISOString(),offers:{id:'imotinet:'+id,title,original_url:card.link,property_type:type,deal_type:deal==='rent'?'rent':'sale',district,price_eur:pr,area_sqm:ar,advertiser_type:advertiserType,advertiser_name:null,is_active:true,offer_sources:{name:'Imoti.net'}}}
+    return{id:'imotinet:'+id,score:100,status:'new',created_at:new Date().toISOString(),offers:{id:'imotinet:'+id,title,description:detailOk?text.slice(0,6000):null,original_url:card.link,property_type:type,deal_type:deal==='rent'?'rent':'sale',district,price_eur:pr,area_sqm:ar,advertiser_type:advertiserType,advertiser_name:null,is_active:true,offer_sources:{name:'Imoti.net'}}}
   })
 
   const hasMore=allLinks.length>0&&(new RegExp('[?&]page='+(page+1)+'(?:["&]|$)','i').test(html)||new RegExp('>\\s*'+(page+1)+'\\s*<','i').test(html))
