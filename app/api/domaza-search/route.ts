@@ -120,11 +120,7 @@ export async function GET(req:NextRequest){
     if(areaMin!=null&&(area==null||area<areaMin))return null as any
     if(areaMax!=null&&(area==null||area>areaMax))return null as any
 
-    const advertiserType=/частно лице/i.test(lower)
-      ? 'private'
-      : /(агенция за недвижими имоти|брокер|недвижими имоти)/i.test(lower)
-        ? 'agency'
-        : 'unknown'
+    const advertiserType=/(?:агенция(?:та)?\s+(?:за\s+недвижими\s+имоти\s+)?(?:предлага|представя|продава|отдава)|брокер(?:ът)?\s+(?:предлага|представя)|нашата\s+агенция|оферта\s+на\s+агенция)/i.test(lower)?'agency':/(?:аз\s+съм\s+собственик|собственик\s+съм|собственик\s+(?:продава|отдава)|(?:директно|лично)\s+от\s+собственик|(?:продавам|отдавам)\s+лично|частно\s+лице\s+(?:продава|отдава))/i.test(lower)?'private':'unknown'
 
     const id=link.match(/-16-([0-9]+)-p/)?.[1]||link
     const title=pageTitle||propertyType+' · '+district
