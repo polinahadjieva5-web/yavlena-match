@@ -20,14 +20,12 @@ function normalizeDescriptionForDedupe(value:any){
   const text=String(value||'')
     .toLowerCase()
     .replace(/<[^>]+>/g,' ')
-    .replace(/https?:\/\/\S+/g,' ')
-    .replace(/\+?[0-9][0-9 ()+.-]{6,}[0-9]/g,' ')
-    .replace(/\b[0-9]+(?:[.,][0-9]+)?\b/g,' # ')
-    .replace(/[^\p{L}\s#]/gu,' ')
+    .replace(/&nbsp;|&#160;/gi,' ')
+    .replace(/&amp;/gi,'&')
     .replace(/\s+/g,' ')
     .trim()
   const words=text.split(' ').filter(Boolean)
-  if(text.length<120||words.length<18)return''
+  if(text.length<80||words.length<12)return''
   return text
 }
 
