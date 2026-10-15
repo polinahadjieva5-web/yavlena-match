@@ -53,6 +53,25 @@ export default function Matches(){
     return out
   }
 
+  async function validateActiveRows(input:any[]){
+    const urls=[...new Set(input.map((r:any)=>r?.offers?.original_url).filter(Boolean))]
+    if(!urls.length)return []
+    const statusMap=new Map<string,string>()
+    for(let i=0;i<urls.length;i+=50){
+      try{
+        const res=await fetch('/api/validate-active',{
+          method:'POST',
+          headers:{'content-type':'application/json'},
+          body:JSON.stringify({urls:urls.slice(i,i+50)})
+        })
+        if(!res.ok)continue
+        const data=await res.json().catch(()=>null)
+        for(const item of data?.results||[])if(item?.url)statusMap.set(item.url,item.status||'unknown')
+      }catch{}
+    }
+    return input.filter((r:any)=>statusMap.get(r?.offers?.original_url)==='active')
+  }
+
   async function load(){
     const{data:{user}}=await supabase.auth.getUser()
     if(!user){router.replace('/login');return}
@@ -70,7 +89,9 @@ export default function Matches(){
       all.push(...(data||[]))
       if((data||[]).length<pageSize)break
     }
-    setRows(dedupeRows(all.filter(districtMatches)))
+    const districtRows=all.filter(districtMatches)
+    const activeRows=await validateActiveRows(districtRows)
+    setRows(dedupeRows(activeRows))
   }
 
   useEffect(()=>{load()},[])
