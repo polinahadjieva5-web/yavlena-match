@@ -16,6 +16,26 @@ const split=(v:string)=>v.split(',').map(s=>s.trim()).filter(Boolean)
 const numOrNull=(v:any)=>v===''||v===null||v===undefined?null:Number(v)
 const norm=(v:any)=>String(v||'').toLowerCase().trim()
 
+function advertiserCategory(r:any):'private'|'agency'|'unknown'{
+  const o=r?.offers||{}
+  const source=norm(o.offer_sources?.name)
+  const name=norm(o.advertiser_name)
+  const description=norm(o.description)
+  const declared=norm(o.advertiser_type)
+  // An identified agency outranks a generic claim such as "без брокер".
+  if(source.includes('yavlena')||/(?:^|[\s.,-])(агенция|недвижими имоти|имоти|естейт|estate|properties|realty|пропъртис|брокер|оод|еоод)(?:$|[\s.,-])/i.test(name))return'agency'
+  if(/(?:агенция(?:та)?\s+(?:за\s+недвижими\s+имоти\s+)?(?:предлага|представя|продава|отдава)|брокер(?:ът)?\s+(?:предлага|представя)|нашата\s+агенция|оферта\s+на\s+агенция)/i.test(description))return'agency'
+  if(declared==='agency')return'agency'
+  if(declared==='private'){
+    // Old Estate Assistant and Imot.bg data could incorrectly infer private sellers.
+    if(source.includes('estate assistant')||source.includes('imot.bg')){
+      return /(?:аз\s+съм\s+собственик|собственик\s+съм|собственик\s+(?:продава|отдава)|(?:директно|лично)\s+от\s+собственик|(?:продавам|отдавам)\s+лично|частно\s+лице\s+(?:продава|отдава))/i.test(description)?'private':'unknown'
+    }
+    return'private'
+  }
+  return'unknown'
+}
+
 function normalizeDescriptionForDedupe(value:any){
   const text=String(value||'')
     .toLowerCase()
@@ -98,6 +118,9 @@ export default function Buyers(){
   const[msg,setMsg]=useState('')
   const[searching,setSearching]=useState<string|null>(null)
   const[selected,setSelected]=useState<any|null>(null)
+  const[resultsHidden,setResultsHidden]=useState(false)
+  const[resultsLoading,setResultsLoading]=useState(false)
+  const[resultFilter,setResultFilter]=useState<'all'|'private'|'agency'|'unknown'>('all')
   const[results,setResults]=useState<any[]>([])
   const[searchInfo,setSearchInfo]=useState('')
   const[searchProgress,setSearchProgress]=useState({done:0,total:7,label:''})
@@ -207,7 +230,7 @@ export default function Buyers(){
         target._variants=[...current,variant]
       }else target._variants=current
       target._duplicateCount=target._variants.length
-      if(target.offers?.advertiser_type==='unknown'&&variant.advertiser_type!=='unknown'){
+      if((target.offers?.advertiser_type==='unknown'&&variant.advertiser_type!=='unknown')||(variant.advertiser_type==='agency'&&target.offers?.advertiser_type==='private')){
         target.offers={...target.offers,advertiser_type:variant.advertiser_type,advertiser_name:variant.advertiser_name||target.offers?.advertiser_name}
       }
     }
@@ -305,7 +328,7 @@ export default function Buyers(){
   async function searchNow(b:any){
     const s=b.buyer_searches?.[0];if(!s)return
     const started=Date.now()
-    setSearching(b.id);setDeepScanning(true);setMsg('');setSourceStatus('');setSelected(b);setResults([])
+    setSearching(b.id);setDeepScanning(true);setMsg('');setSourceStatus('');setSelected(b);setResultsHidden(false);setResultFilter('all');setResults([])
     setSearchProgress({done:0,total:7,label:'Стартирам всички източници...'})
     setSearchInfo(`Прилагам: ${(s.property_types||[]).join(', ')||'всички типове'} · ${(s.districts||[]).join(', ')||'всички райони'}${s.price_min?` · от €${Number(s.price_min).toLocaleString('bg-BG')}`:''}${s.price_max?` · до €${Number(s.price_max).toLocaleString('bg-BG')}`:''}${s.area_min?` · от ${s.area_min} кв.м`:''}${s.area_max?` · до ${s.area_max} кв.м`:''}`)
 
@@ -411,12 +434,27 @@ export default function Buyers(){
 
   async function loadMatches(b:any){
     setSelected(b)
-    const stored=await getStoredMatches(b)
-    setResults(stored)
+    setResultsHidden(false)
+    setResultFilter('all')
+    setResultsLoading(true)
+    setResults([])
+    try{
+      const stored=await getStoredMatches(b)
+      setResults(stored)
+    }finally{setResultsLoading(false)}
   }
 
   async function openResults(b:any){
+    // Preserve the just-fetched portal offers while toggling their visibility.
+    if(selected?.id===b.id){setResultsHidden(false);return}
     await loadMatches(b)
+  }
+
+  const filteredResults=results.filter(r=>resultFilter==='all'||advertiserCategory(r)===resultFilter)
+  const advertiserCounts={
+    private:results.filter(r=>advertiserCategory(r)==='private').length,
+    agency:results.filter(r=>advertiserCategory(r)==='agency').length,
+    unknown:results.filter(r=>advertiserCategory(r)==='unknown').length
   }
 
   return <>
@@ -438,12 +476,13 @@ export default function Buyers(){
     <div className="listCard">
       {buyers.length?buyers.map(b=>{const s=b.buyer_searches?.[0];return <div className="buyerBlock" key={b.id}>
         <div className="buyerRow"><span className="statusDot"/><div className="grow"><b>{b.full_name}</b><div className="meta">{(s?.property_types||[]).join(', ')||'Имот'} · {(s?.districts||[]).join(', ')||'Всички райони'} · {s?.price_min?`от €${Number(s.price_min).toLocaleString('bg-BG')} · `:''}{s?.price_max?`до €${Number(s.price_max).toLocaleString('bg-BG')}`:'без горен лимит'}{s?.area_min?` · от ${s.area_min} кв.м`:''}{s?.area_max?` · до ${s.area_max} кв.м`:''}</div><div className="meta">{s?.floor_min!=null?`етаж от ${s.floor_min} · `:''}{s?.floor_max!=null?`етаж до ${s.floor_max} · `:''}{(s?.construction_types||[]).length?`${s.construction_types.join(', ')} · `:''}{s?.year_min?`след ${s.year_min} г. · `:''}{s?.last_manual_search_at?`последно търсене ${new Date(s.last_manual_search_at).toLocaleString('bg-BG')}`:'няма стартирано търсене'}</div></div><span className="tag">{s?.monitoring_enabled?'Мониторинг включен':'Мониторинг изключен'}</span></div>
-        <div className="buyerActions"><button className="btn primary" onClick={()=>searchNow(b)} disabled={searching===b.id}><Search size={16}/>{searching===b.id?'Търся по всички критерии...':'Потърси оферти'}</button><button className="btn" onClick={()=>openResults(b)}>Виж резултати</button><button className="btn" onClick={()=>toggleMonitoring(b)}>{s?.monitoring_enabled?<BellOff size={16}/>:<Bell size={16}/>} {s?.monitoring_enabled?'Спри известия':'Включи известия'}</button><button className="btn" onClick={()=>openEdit(b)}><Pencil size={15}/>Редактирай</button><button className="btn" onClick={()=>deleteBuyer(b)}><Trash2 size={15}/>Изтрий</button></div>
+        <div className="buyerActions"><button className="btn primary" onClick={()=>searchNow(b)} disabled={searching===b.id}><Search size={16}/>{searching===b.id?'Търся по всички критерии...':'Потърси оферти'}</button><button className="btn" onClick={()=>openResults(b)}>{selected?.id===b.id&&resultsHidden?'Покажи резултатите':'Виж резултати'}</button><button className="btn" onClick={()=>toggleMonitoring(b)}>{s?.monitoring_enabled?<BellOff size={16}/>:<Bell size={16}/>} {s?.monitoring_enabled?'Спри известия':'Включи известия'}</button><button className="btn" onClick={()=>openEdit(b)}><Pencil size={15}/>Редактирай</button><button className="btn" onClick={()=>deleteBuyer(b)}><Trash2 size={15}/>Изтрий</button></div>
       </div>}):<div className="empty" style={{margin:'14px 0'}}>Няма добавени купувачи.</div>}
     </div>
 
-    {selected&&<div className="card resultsCard"><div className="toolbar"><div><h2 style={{margin:0}}>Оферти за {selected.full_name}</h2><div className="meta">Показват се всички намерени оферти по критериите на купувача — без лимит на броя. Районът е задължителен.</div><div className="meta" style={{marginTop:5}}>Общо: {results.length} · Частни: {results.filter((r:any)=>r.offers?.advertiser_type==='private').length} · Агенции: {results.filter((r:any)=>r.offers?.advertiser_type==='agency').length} · Неуточнени: {results.filter((r:any)=>!['private','agency'].includes(r.offers?.advertiser_type)).length}</div></div><button className="btn" onClick={()=>setSelected(null)}>Скрий</button></div>
-      {results.length?results.sort((a,b)=>new Date(b.offers?.source_published_at||b.created_at).getTime()-new Date(a.offers?.source_published_at||a.created_at).getTime()).map(r=>{const variants=Array.isArray(r._variants)&&r._variants.length?r._variants:[offerVariant(r)];return <div className="offerResult" key={r.id}><div className="grow"><div className="offerTop"><b>{r.offers?.title||'Имотна оферта'}</b><span className="pill private">{r._active_validation==='active'?'Потвърдена активна':'Активна'}</span><span className={r.offers?.advertiser_type==='private'?'pill private':r.offers?.advertiser_type==='agency'?'pill agency':'pill'}>{r.offers?.advertiser_type==='private'?'Частно лице':r.offers?.advertiser_type==='agency'?'Агенция':'Неуточнен подател'}</span>{variants.length>1&&<span className="tag">{variants.length} публикации на същия имот</span>}</div><div className="meta">{r.offers?.offer_sources?.name||'Източник'}{r.offers?.advertiser_name?` · Подател: ${r.offers.advertiser_name}`:''} · {r.offers?.district||'—'} · {r.offers?.price_eur?`€${Number(r.offers.price_eur).toLocaleString('bg-BG')}`:'без цена'}{r.offers?.area_sqm?` · ${r.offers.area_sqm} кв.м`:''}{r.offers?.floor!=null?` · ет. ${r.offers.floor}`:''}{r.offers?.construction_type?` · ${r.offers.construction_type}`:''} · съвпадение 100% · {r.offers?.source_published_at?new Date(r.offers.source_published_at).toLocaleString('bg-BG'):'открита при последната проверка'}</div>{variants.length>1&&<div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:8}}>{variants.map((v:any,i:number)=>v.url?<a key={v.url||i} className="btn" href={v.url} target="_blank" rel="noreferrer">{v.source}{v.price?` · €${Number(v.price).toLocaleString('bg-BG')}`:''}{v.area?` · ${v.area} кв.м`:''}</a>:null)}</div>}</div>{variants.length===1&&r.offers?.original_url&&<a className="btn" href={r.offers.original_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Отвори</a>}</div>}):<div className="empty">Няма оферти, които да покриват текущите критерии.</div>}
+    {selected&&!resultsHidden&&<div className="card resultsCard" id="buyer-results"><div className="toolbar"><div><h2 style={{margin:0}}>Оферти за {selected.full_name}</h2><div className="meta">Показват се всички намерени оферти по критериите на купувача — без лимит на броя. Районът е задължителен.</div><div className="meta" style={{marginTop:5}}>Общо: {results.length} · Частни: {advertiserCounts.private} · Агенции: {advertiserCounts.agency} · Неуточнени: {advertiserCounts.unknown}</div></div><button className="btn" onClick={()=>setResultsHidden(true)}>Скрий резултатите</button></div>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',margin:'14px 0'}}>{([{id:'all',label:'Всички',count:results.length},{id:'private',label:'Частни',count:advertiserCounts.private},{id:'agency',label:'Агенции',count:advertiserCounts.agency},{id:'unknown',label:'Неуточнени',count:advertiserCounts.unknown}] as const).map(x=><button key={x.id} className={resultFilter===x.id?'btn primary':'btn'} type="button" onClick={()=>setResultFilter(x.id)}>{x.label} ({x.count})</button>)}</div>
+      {resultsLoading?<div className="empty">Зареждам запазените съвпадения...</div>:filteredResults.length?filteredResults.slice().sort((a,b)=>new Date(b.offers?.source_published_at||b.created_at).getTime()-new Date(a.offers?.source_published_at||a.created_at).getTime()).map(r=>{const variants=Array.isArray(r._variants)&&r._variants.length?r._variants:[offerVariant(r)];return <div className="offerResult" key={r.id}><div className="grow"><div className="offerTop"><b>{r.offers?.title||'Имотна оферта'}</b><span className="pill private">{r._active_validation==='active'?'Потвърдена активна':'Активна'}</span><span className={advertiserCategory(r)==='private'?'pill private':advertiserCategory(r)==='agency'?'pill agency':'pill'}>{advertiserCategory(r)==='private'?'Частно лице':advertiserCategory(r)==='agency'?'Агенция':'Неуточнен подател'}</span>{variants.length>1&&<span className="tag">{variants.length} публикации на същия имот</span>}</div><div className="meta">{r.offers?.offer_sources?.name||'Източник'}{r.offers?.advertiser_name?` · Подател: ${r.offers.advertiser_name}`:''} · {r.offers?.district||'—'} · {r.offers?.price_eur?`€${Number(r.offers.price_eur).toLocaleString('bg-BG')}`:'без цена'}{r.offers?.area_sqm?` · ${r.offers.area_sqm} кв.м`:''}{r.offers?.floor!=null?` · ет. ${r.offers.floor}`:''}{r.offers?.construction_type?` · ${r.offers.construction_type}`:''} · съвпадение 100% · {r.offers?.source_published_at?new Date(r.offers.source_published_at).toLocaleString('bg-BG'):'открита при последната проверка'}</div>{variants.length>1&&<div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:8}}>{variants.map((v:any,i:number)=>v.url?<a key={v.url||i} className="btn" href={v.url} target="_blank" rel="noreferrer">{v.source}{v.price?` · €${Number(v.price).toLocaleString('bg-BG')}`:''}{v.area?` · ${v.area} кв.м`:''}</a>:null)}</div>}</div>{variants.length===1&&r.offers?.original_url&&<a className="btn" href={r.offers.original_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Отвори</a>}</div>}):<div className="empty">{results.length?'Няма оферти в избраната категория.':'Няма заредени оферти. Резултатите от публичните сайтове се запазват при скриване, докато си на тази страница.'}</div>}
     </div>}
 
     {open&&<div className="modalBack"><form className="modal" onSubmit={saveBuyer}><div className="modalHead"><div><div className="eyebrow">{editing?'Редакция на клиент':'Нов клиент'}</div><h2 style={{margin:'4px 0'}}>Подробни критерии за търсене</h2></div><button type="button" className="x" onClick={()=>setOpen(false)}><X size={18}/></button></div>
