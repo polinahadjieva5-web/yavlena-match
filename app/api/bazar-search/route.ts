@@ -85,7 +85,7 @@ export async function GET(req:NextRequest){
     const id=card.link.match(/obiava-(\d+)/)?.[1]||card.link
     const title=detailOk?(raw.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]||type+' · '+district).replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim():type+' · '+district
 
-    return{id:'bazar:'+id,score:100,status:'new',created_at:new Date().toISOString(),offers:{id:'bazar:'+id,title,original_url:card.link,property_type:type,deal_type:deal==='rent'?'rent':'sale',district,price_eur:pr,area_sqm:ar,construction_type:b,advertiser_type:s.type,advertiser_name:s.name,is_active:true,offer_sources:{name:'Bazar.bg'}}}
+    return{id:'bazar:'+id,score:100,status:'new',created_at:new Date().toISOString(),offers:{id:'bazar:'+id,title,description:detailOk?text.slice(0,6000):null,original_url:card.link,property_type:type,deal_type:deal==='rent'?'rent':'sale',district,price_eur:pr,area_sqm:ar,construction_type:b,advertiser_type:s.type,advertiser_name:s.name,is_active:true,offer_sources:{name:'Bazar.bg'}}}
   })
 
   const hasMore=new RegExp('[?&]page='+(page+1)+'(?:["&]|$)','i').test(html)||new RegExp('>\\s*'+(page+1)+'\\s*<','i').test(html)&&links.length>0
