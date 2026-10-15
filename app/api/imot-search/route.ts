@@ -190,7 +190,10 @@ export async function GET(req:NextRequest){
         dealer.match(/<div class=["']name["']>([^<]+)<\/div>/i)?.[1]?.trim()||
         dealer.match(/href=["']https?:\/\/([^."]+)\.imot\.bg/i)?.[1]||
         null
-      advertiserType=dealer?'agency':'private'
+      // Missing dealer markup is not proof that the seller is a private person.
+      // Only trust an explicit seller/advertiser label on the detail page.
+      const privateSellerLabel=/(?:подател|продавач|тип\s+подател|тип\s+потребител)\s*:?\s*(?:<[^>]*>\s*){0,4}(?:частно\s+лице|собственик)/i.test(raw)
+      advertiserType=dealer?'agency':privateSellerLabel?'private':'unknown'
     }else{
       listFallback++
     }
