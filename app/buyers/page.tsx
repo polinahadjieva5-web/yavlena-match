@@ -136,6 +136,8 @@ export default function Buyers(){
   const[activeRun,setActiveRun]=useState<SavedSearch|null>(null)
   const[historyWarning,setHistoryWarning]=useState('')
   const[portalErrors,setPortalErrors]=useState<Record<string,string>>({})
+  const[portalProgress,setPortalProgress]=useState<Record<string,{pages:number;found:number;private:number;details:number;raw:number;status:string}>>({})
+  const[supabaseIssues,setSupabaseIssues]=useState<string[]>([])
   const[exporting,setExporting]=useState(false)
 
   async function load(){
@@ -297,7 +299,8 @@ export default function Buyers(){
     const all:any[]=[]
     const seen=new Set<string>()
     const errorBySource:Record<string,string>={}
-    setPortalErrors({})
+    setPortalErrors({});setPortalProgress({})
+    for(const ep of endpoints)setPortalProgress(prev=>({...prev,[ep.name]:{pages:0,found:0,private:0,details:0,raw:0,status:'Търси се'}}))
     setSearchProgress({done:0,total,label:'Стартирам публичните източници...'})
     await Promise.all(endpoints.map(async ep=>{
       for(const district of districts){
@@ -315,9 +318,18 @@ export default function Buyers(){
             try{
               const r:any=await fetchPortalPage(ep.path+'?'+p.toString(),ep.name)
               data=await r.json().catch(()=>null)
-            }catch(e:any){errorBySource[ep.name]='Неуспешно зареждане: '+String(e?.message||e);setPortalErrors({...errorBySource});break}
-            if(!data?.ok){errorBySource[ep.name]=String(data?.error||'Източникът не отговори');setPortalErrors({...errorBySource});break}
+            }catch(e:any){errorBySource[ep.name]='Неуспешно зареждане: '+String(e?.message||e);setPortalErrors({...errorBySource});setPortalProgress(prev=>({...prev,[ep.name]:{...(prev[ep.name]||{pages:0,found:0,private:0,details:0,raw:0}),status:'Грешка'}}));break}
+            if(!data?.ok){errorBySource[ep.name]=String(data?.error||'Източникът не отговори');setPortalErrors({...errorBySource});setPortalProgress(prev=>({...prev,[ep.name]:{...(prev[ep.name]||{pages:0,found:0,private:0,details:0,raw:0}),status:'Грешка'}}));break}
             const items=data.items||[]
+            setPortalProgress(prev=>{
+              const old=prev[ep.name]||{pages:0,found:0,private:0,details:0,raw:0,status:'Търси се'}
+              return {...prev,[ep.name]:{
+                pages:old.pages+1,found:old.found+items.length,
+                private:old.private+items.filter((item:any)=>advertiserCategory(item)==='private').length,
+                details:old.details+Number(data.detail_success||0),
+                raw:old.raw+Number(data.raw_count||0),status:data.has_more?'Проверяват се следващите страници':'Последна страница'
+              }}
+            })
             const newItems:any[]=[]
             for(const item of items){
               const key=String(item?.offers?.original_url||item?.offers?.id||item?.id||'').split('#')[0]
@@ -338,6 +350,7 @@ export default function Buyers(){
         }
       }
       done++
+      setPortalProgress(prev=>({...prev,[ep.name]:{...(prev[ep.name]||{pages:0,found:0,private:0,details:0,raw:0}),status:errorBySource[ep.name]?'Непълно':'Приключи'}}))
       setSearchProgress({done,total,label:`${ep.name} приключи`})
     }))
     return all
@@ -351,7 +364,7 @@ export default function Buyers(){
     const archiveId=crypto.randomUUID()
     setSearching(b.id);setDeepScanning(true);setMsg('');setSourceStatus('')
     setSelected(b);setResultsHidden(false);setResultFilter('all');setResults([])
-    setHistoryWarning('');setPortalErrors({});setActiveRun(null)
+    setHistoryWarning('');setPortalErrors({});setPortalProgress({});setSupabaseIssues([]);setActiveRun(null)
     setSearchProgress({done:0,total:7,label:'Стартирам всички източници...'})
     setSearchInfo('Прилагам: '+(criteria.property_types||[]).join(', ')+' · '+(criteria.districts||[]).join(', '))
     try{
@@ -366,10 +379,11 @@ export default function Buyers(){
       try{
         const{data,error}:any=await timed(
           supabase.functions.invoke('portal-search',{body:{buyer_id:b.id,run_type:'manual'}}) as any,
-          52000,'Supabase търсенето'
+          95000,'Supabase търсенето'
         )
         if(error)supError=error
         else if(data?.ok===false)supError=new Error(String(data.error||'Източниците не отговориха'))
+        else if(!data?.ok)supError=new Error('Supabase не потвърди приключването на търсенето.')
         else supData=data
       }catch(e:any){supError=e}
       const stored=await getStoredMatches(b)
@@ -393,18 +407,19 @@ export default function Buyers(){
     })
     const finished=await Promise.race([
       allDone.then(()=>true),
-      new Promise<boolean>(resolve=>setTimeout(()=>resolve(false),75000))
+      new Promise<boolean>(resolve=>setTimeout(()=>resolve(false),120000))
     ])
     const stats=supData?.portal_stats||supData?.sources||supData?.stats||null
     if(stats&&typeof stats==='object'){
-      const entries=Array.isArray(stats)
-        ? stats.map((x:any)=>[x?.name||x?.source||'Източник',x?.count??x?.total??x?.found??0])
-        : Object.entries(stats).map(([k,v]:any)=>[k,typeof v==='object'?(v?.count??v?.total??v?.found??0):v])
-      setSourceStatus(entries.map(([name,count]:any)=>name+': '+count).join(' · '))
-    }else if(supError)setSourceStatus('Supabase източниците не отговориха напълно.')
+      const entries:any[]=Array.isArray(stats)?stats:Object.entries(stats).map(([source,info]:any)=>({source,...(info&&typeof info==='object'?info:{count:info})}))
+      const issues=entries.filter(e=>e?.status&&e.status!=='ok').map(e=>(e.source||e.name||'Източник')+' — '+(e.status==='timeout'?'изтекло време':e.error||e.status))
+      setSupabaseIssues(issues)
+      setSourceStatus(entries.map(e=>(e.source||e.name||'Източник')+': '+(e.count??e.total??e.found??0)+(e.status&&e.status!=='ok'?' ('+e.status+')':'')).join(' · '))
+    }else if(supError)setSourceStatus('Supabase: '+String(supError?.message||supError))
     const secs=Math.max(1,Math.floor((Date.now()-started)/1000))
     setMsg(finished?'Търсенето приключи за '+secs+' сек. Резултатите са подредени по сайтове.':'Първите резултати са готови за '+secs+' сек. Останалите източници продължават да добавят оферти.')
-    if(supError)setMsg(prev=>prev+' Има неуспешен Supabase източник.')
+    if(supError)setMsg(prev=>prev+' Supabase: '+String(supError?.message||supError))
+    else if(stats&&Array.isArray(stats)&&stats.some((x:any)=>x?.status&&x.status!=='ok'))setMsg(prev=>prev+' Някои фирмени източници са върнали грешка — виж подробностите по-долу.')
     setSearching(null);setSearchInfo('')
   }
 
@@ -446,7 +461,7 @@ export default function Buyers(){
         .eq('offers.is_active',true)
         .order('created_at',{ascending:false})
         .range(from,from+pageSize-1)
-      if(error){setMsg(`Не успях да заредя намерените оферти: ${error.message}`);return []}
+      if(error){setSourceStatus('Запазените съвпадения не се заредиха: '+error.message);return []}
       all.push(...(data||[]))
       if((data||[]).length<pageSize)break
     }
@@ -533,6 +548,7 @@ export default function Buyers(){
     </div>}
     {msg&&<div className={msg.startsWith('Готово')?'ok':'err'} style={{marginBottom:14}}>{msg}</div>}
     {sourceStatus&&<div className="meta" style={{margin:'-4px 0 14px'}}>Фирмени източници: {sourceStatus}</div>}
+    {supabaseIssues.length>0&&<div className="err" style={{marginBottom:14}}>Непълни Supabase източници: {supabaseIssues.join(' · ')}</div>}
 
     <div className="listCard">
       {buyers.length?buyers.map(b=>{const s=b.buyer_searches?.[0];return <div className="buyerBlock" key={b.id}>
@@ -577,12 +593,14 @@ export default function Buyers(){
             <summary className="portalSummary">
               <span className="portalName">{name}</span>
               <span className="portalCount">{found.length} оферти</span>
+              {portalProgress[name]&&<span className="meta" style={{margin:0}}>{portalProgress[name].pages} стр. · {portalProgress[name].status}</span>}
               <span className="portalPrivate">{privateCount} частни</span>
               {portalErrors[name]&&<span className="portalError">Проблем с източника</span>}
               <span className="portalArrow">⌄</span>
             </summary>
             <div className="portalOffers">
               {portalErrors[name]&&<div className="err">{portalErrors[name]}</div>}
+              {portalProgress[name]&&<div className="meta" style={{marginBottom:10}}>Проверени страници: {portalProgress[name].pages} · Обяви след първичното филтриране: {portalProgress[name].found} · Разпознати частни: {portalProgress[name].private} · Заредени подробности: {portalProgress[name].details}</div>}
               {found.length?found.map(offerCard):<div className="empty">{resultFilter==='all'?'При това търсене няма намерени оферти от този сайт.':'Няма оферти от избраната категория за този сайт.'}</div>}
             </div>
           </details>
