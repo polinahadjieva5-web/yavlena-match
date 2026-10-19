@@ -123,14 +123,15 @@ export async function GET(req:NextRequest){
   }
 
   const html=await readImot(listResponse)
-  const rawLinks=[...html.matchAll(/href=["'](\/\/www\.imot\.bg\/obiava-[^"']+)["']/gi)]
-    .map(m=>'https:'+m[1].split('#')[0])
+  const rawLinks=[...html.matchAll(/href=["']((?:https?:)?\/\/(?:www\.)?imot\.bg\/obiava-[^"']+|\/obiava-[^"']+)["']/gi)]
+    .map(m=>new URL(m[1].split('#')[0],'https://www.imot.bg').toString())
   const links=[...new Set(rawLinks)]
 
   const cards=links.map(link=>{
     const protocolRelative=link.replace(/^https:/,'')
     let pos=html.indexOf(protocolRelative)
     if(pos<0)pos=html.indexOf(link)
+    if(pos<0)pos=html.indexOf(link.replace(/^https?:\/\/(?:www\.)?imot\.bg/i,''))
     const snippet=pos>=0?html.slice(Math.max(0,pos-1800),pos+5200):''
     return {link,snippet,price:cardPrice(snippet),area:cardArea(snippet)}
   }).filter(card=>{
