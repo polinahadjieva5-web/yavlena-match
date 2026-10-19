@@ -192,8 +192,14 @@ export async function GET(req:NextRequest){
         null
       // Missing dealer markup is not proof that the seller is a private person.
       // Only trust an explicit seller/advertiser label on the detail page.
-      const privateSellerLabel=/(?:подател|продавач|тип\s+подател|тип\s+потребител)\s*:?\s*(?:<[^>]*>\s*){0,4}(?:частно\s+лице|собственик)/i.test(raw)
-      advertiserType=dealer?'agency':privateSellerLabel?'private':'unknown'
+      // Imot.bg explicitly displays "/Частно лице/" in the contact section.
+      // Use the publisher's contact label, never generic phrases in the description.
+      const contactAt=text.search(/За контакт\s*:/i)
+      const contactSection=contactAt>=0?text.slice(contactAt,contactAt+900):''
+      const identitySection=text.match(/Имотът се предлага от\s*:?\s*([\s\S]{0,550})/i)?.[1]||''
+      const agencySeller=/агенция\s+в\s+imot\.bg|агенция\s+за\s+недвижими|\/\s*агенция\s*\//i.test(contactSection+' '+identitySection)
+      const privateSellerLabel=/\/\s*частно\s+лице\s*\//i.test(contactSection)||/^(?:\s*частно\s+лице\b|\s*собственик\b)/i.test(identitySection)
+      advertiserType=dealer||agencySeller?'agency':privateSellerLabel?'private':'unknown'
     }else{
       listFallback++
     }
