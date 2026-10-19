@@ -313,6 +313,8 @@ export default function Buyers(){
             if(s.price_max!=null)p.set('price_max',String(s.price_max))
             if(s.area_min!=null)p.set('area_min',String(s.area_min))
             if(s.area_max!=null)p.set('area_max',String(s.area_max))
+            if(s.floor_min!=null)p.set('floor_min',String(s.floor_min))
+            if(s.floor_max!=null)p.set('floor_max',String(s.floor_max))
             if((s.construction_types||[]).length)p.set('construction',(s.construction_types||[]).join(','))
             let data:any=null
             try{
@@ -526,6 +528,7 @@ export default function Buyers(){
         </div>
         <div className="meta">{o.district||'Район не е посочен'} · {o.price_eur!=null?Number(o.price_eur).toLocaleString('bg-BG')+' €':'Без цена'} · {o.area_sqm!=null?o.area_sqm+' кв.м':'Без площ'}</div>
         <div className="meta">Тип: {o.property_type||'—'} · Строителство: {o.construction_type||'—'} · Етаж: {o.floor??'—'} · Година: {o.construction_year??'—'}</div>
+        {(selected?.buyer_searches?.[0]?.floor_min!=null||selected?.buyer_searches?.[0]?.floor_max!=null)&&o.floor==null&&<div className="meta" style={{color:'#9b6208'}}>Етажът не е потвърден от източника — провери преди презентация.</div>}
         <div className="meta">Подател: {o.advertiser_name||seller}{o.contact_phone?' · Телефон: '+o.contact_phone:''}{o.source_published_at?' · Публикувана: '+new Date(o.source_published_at).toLocaleDateString('bg-BG'):''}</div>
         {variants.length>1&&<div className="meta">Публикации в същия източник: {variants.length}</div>}
       </div>
