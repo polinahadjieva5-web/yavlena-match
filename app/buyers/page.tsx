@@ -4,6 +4,8 @@ import {useEffect,useState} from 'react'
 import {useRouter} from 'next/navigation'
 import {Plus,X,Search,Bell,BellOff,ExternalLink,Pencil,Trash2} from 'lucide-react'
 import {supabase} from '@/lib/supabase'
+import {saveSearchRun,appendSearchOffers,completeSearchRun,listBuyerSearches,deleteBuyerSearches} from '@/lib/search-history'
+import type {SavedSearch} from '@/lib/search-history'
 
 const empty={
   full_name:'',phone:'',email:'',notes:'',deal_type:'purchase',districts:'',property_types:'3-стаен',
@@ -53,7 +55,7 @@ function duplicateDescriptionKey(r:any){
   const o=r?.offers||{}
   const description=normalizeDescriptionForDedupe(o.description)
   if(!description)return''
-  return [norm(o.property_type),norm(o.district),description].join('|')
+  return [norm(o.offer_sources?.name),norm(o.property_type),norm(o.district),description].join('|')
 }
 
 function offerVariant(r:any){
@@ -87,6 +89,9 @@ const CONSTRUCTION_TYPES=['Тухла','Панел','ЕПК','Гредоред',
 const FLOORS=Array.from({length:21},(_,i)=>i)
 const YEARS=[1950,1960,1970,1980,1990,2000,2005,2010,2015,2020,2022,2023,2024,2025,2026]
 const MONITORING_OPTIONS=[5,10,15,30,60,120,360,720,1440]
+const PORTAL_NAMES=['Imot.bg','Imoti.net','Homes.bg','Bazar.bg','ALO.bg','Domaza','Yavlena.com','Estate Assistant','OLX']
+const portalName=(r:any)=>String(r?.offers?.offer_sources?.name||'Неуточнен източник')
+
 
 function MultiSelect({label,value,options,onChange,full=false,placeholder='Избери'}:any){
   const selected=split(value)
@@ -126,6 +131,11 @@ export default function Buyers(){
   const[searchProgress,setSearchProgress]=useState({done:0,total:7,label:''})
   const[deepScanning,setDeepScanning]=useState(false)
   const[sourceStatus,setSourceStatus]=useState('')
+  const[history,setHistory]=useState<SavedSearch[]>([])
+  const[activeRun,setActiveRun]=useState<SavedSearch|null>(null)
+  const[historyWarning,setHistoryWarning]=useState('')
+  const[portalErrors,setPortalErrors]=useState<Record<string,string>>({})
+  const[exporting,setExporting]=useState(false)
 
   async function load(){
     const{data:{user}}=await supabase.auth.getUser()
@@ -189,7 +199,8 @@ export default function Buyers(){
     if(!window.confirm(`Да изтрия ли купувача „${b.full_name}“ и цялата му история?`))return
     const{error}=await supabase.from('buyers').delete().eq('id',b.id)
     if(error){setMsg(`Не успях да изтрия купувача: ${error.message}`);return}
-    if(selected?.id===b.id){setSelected(null);setResults([])}
+    if(selected?.id===b.id){setSelected(null);setResults([]);setHistory([]);setActiveRun(null)}
+    try{const{data:{user}}=await supabase.auth.getUser();if(user)await deleteBuyerSearches(user.id,b.id)}catch{}
     await load()
   }
 
@@ -269,7 +280,7 @@ export default function Buyers(){
     throw lastError||new Error(`${label} не отговори.`)
   }
 
-  async function loadFallbackResults(s:any){
+  async function loadFallbackResults(s:any,onFound?:(items:any[])=>Promise<void>){
     const endpoints=[
       {path:'/api/bazar-search',name:'Bazar.bg'},
       {path:'/api/homes-search',name:'Homes.bg'},
@@ -284,6 +295,8 @@ export default function Buyers(){
     let done=0
     const all:any[]=[]
     const seen=new Set<string>()
+    const errorBySource:Record<string,string>={}
+    setPortalErrors({})
     setSearchProgress({done:0,total,label:'Стартирам публичните източници...'})
     await Promise.all(endpoints.map(async ep=>{
       for(const district of districts){
@@ -301,14 +314,18 @@ export default function Buyers(){
             try{
               const r:any=await fetchPortalPage(ep.path+'?'+p.toString(),ep.name)
               data=await r.json().catch(()=>null)
-            }catch{break}
-            if(!data?.ok)break
+            }catch(e:any){errorBySource[ep.name]='Неуспешно зареждане: '+String(e?.message||e);setPortalErrors({...errorBySource});break}
+            if(!data?.ok){errorBySource[ep.name]=String(data?.error||'Източникът не отговори');setPortalErrors({...errorBySource});break}
             const items=data.items||[]
+            const newItems:any[]=[]
             for(const item of items){
               const key=String(item?.offers?.original_url||item?.offers?.id||item?.id||'').split('#')[0]
               if(!key||seen.has(key))continue
-              seen.add(key);all.push(item)
-              setResults(prev=>mergeResults(prev,[item]))
+              seen.add(key);all.push(item);newItems.push(item)
+            }
+            if(newItems.length){
+              setResults(prev=>mergeResults(prev,newItems))
+              if(onFound)try{await onFound(newItems)}catch(e:any){setHistoryWarning('Историята не можа да запази всички оферти: '+String(e?.message||e))}
             }
             const fingerprint=String(data.page_signature||items.slice(0,5).map((x:any)=>x?.offers?.original_url||x?.offers?.id).join('|'))
             if(!data.has_more)break
@@ -326,11 +343,21 @@ export default function Buyers(){
   }
 
   async function searchNow(b:any){
-    const s=b.buyer_searches?.[0];if(!s)return
+    const criteria=b.buyer_searches?.[0];if(!criteria)return
+    const {data:{user}}=await supabase.auth.getUser()
+    if(!user){setMsg('Трябва да влезеш в профила си, за да запазиш търсенето.');return}
     const started=Date.now()
-    setSearching(b.id);setDeepScanning(true);setMsg('');setSourceStatus('');setSelected(b);setResultsHidden(false);setResultFilter('all');setResults([])
+    const archiveId=crypto.randomUUID()
+    setSearching(b.id);setDeepScanning(true);setMsg('');setSourceStatus('')
+    setSelected(b);setResultsHidden(false);setResultFilter('all');setResults([])
+    setHistoryWarning('');setPortalErrors({});setActiveRun(null)
     setSearchProgress({done:0,total:7,label:'Стартирам всички източници...'})
-    setSearchInfo(`Прилагам: ${(s.property_types||[]).join(', ')||'всички типове'} · ${(s.districts||[]).join(', ')||'всички райони'}${s.price_min?` · от €${Number(s.price_min).toLocaleString('bg-BG')}`:''}${s.price_max?` · до €${Number(s.price_max).toLocaleString('bg-BG')}`:''}${s.area_min?` · от ${s.area_min} кв.м`:''}${s.area_max?` · до ${s.area_max} кв.м`:''}`)
+    setSearchInfo('Прилагам: '+(criteria.property_types||[]).join(', ')+' · '+(criteria.districts||[]).join(', '))
+    try{
+      await saveSearchRun({id:archiveId,user_id:user.id,buyer_id:b.id,started_at:new Date().toISOString(),status:'running',
+        buyer:{id:b.id,full_name:b.full_name,phone:b.phone,email:b.email,notes:b.notes},
+        criteria:{...criteria},offers:[]})
+    }catch(e:any){setHistoryWarning('Внимание: търсенето работи, но историята в този браузър не може да се запише: '+String(e?.message||e))}
 
     let supError:any=null
     let supData:any=null
@@ -338,52 +365,45 @@ export default function Buyers(){
       try{
         const{data,error}:any=await timed(
           supabase.functions.invoke('portal-search',{body:{buyer_id:b.id,run_type:'manual'}}) as any,
-          52000,
-          'Supabase търсенето'
+          52000,'Supabase търсенето'
         )
         if(error)supError=error
+        else if(data?.ok===false)supError=new Error(String(data.error||'Източниците не отговориха'))
         else supData=data
       }catch(e:any){supError=e}
       const stored=await getStoredMatches(b)
       setResults(prev=>mergeResults(prev,stored))
+      try{await appendSearchOffers(archiveId,stored)}catch(e:any){setHistoryWarning('Не всички резултати са записани в историята. '+String(e?.message||e))}
     })()
-
     const fallbackTask=(async()=>{
       try{
-        const fallback=await loadFallbackResults(s)
-        setResults(prev=>mergeResults(prev,fallback))
-      }catch{}
+        const found=await loadFallbackResults(criteria,rows=>appendSearchOffers(archiveId,rows))
+        setResults(prev=>mergeResults(prev,found))
+      }catch(e:any){setHistoryWarning('Част от публичните източници не се заредиха: '+String(e?.message||e))}
       finally{setDeepScanning(false)}
     })()
-
-    const foreground=Promise.allSettled([supTask,fallbackTask])
+    const allDone=Promise.allSettled([supTask,fallbackTask]).then(async()=>{
+      try{
+        await completeSearchRun(archiveId,supError?'partial':'completed')
+        const runs=await listBuyerSearches(user.id,b.id)
+        setHistory(runs)
+        setActiveRun(prev=>prev?.id===archiveId?runs.find(x=>x.id===archiveId)||prev:prev)
+      }catch(e:any){setHistoryWarning('Историята не може да се обнови: '+String(e?.message||e))}
+    })
     const finished=await Promise.race([
-      foreground.then(()=>true),
+      allDone.then(()=>true),
       new Promise<boolean>(resolve=>setTimeout(()=>resolve(false),75000))
     ])
-
-    const stored=await getStoredMatches(b)
-    setResults(prev=>mergeResults(prev,stored))
-
     const stats=supData?.portal_stats||supData?.sources||supData?.stats||null
     if(stats&&typeof stats==='object'){
       const entries=Array.isArray(stats)
         ? stats.map((x:any)=>[x?.name||x?.source||'Източник',x?.count??x?.total??x?.found??0])
         : Object.entries(stats).map(([k,v]:any)=>[k,typeof v==='object'?(v?.count??v?.total??v?.found??0):v])
-      const interesting=entries.filter(([name]:any)=>/estate|imot/i.test(String(name)))
-      setSourceStatus(interesting.length?interesting.map(([name,count]:any)=>`${name}: ${count}`).join(' · '):'Supabase не върна отделна статистика за Estate / Imot firm.')
-    }else{
-      setSourceStatus(supError?'Supabase firm източниците не отговориха успешно.':'Supabase не върна отделна статистика за Estate / Imot firm.')
-    }
-
+      setSourceStatus(entries.map(([name,count]:any)=>name+': '+count).join(' · '))
+    }else if(supError)setSourceStatus('Supabase източниците не отговориха напълно.')
     const secs=Math.max(1,Math.floor((Date.now()-started)/1000))
-    if(finished){
-      setMsg(`Готово за ${secs} сек. Резултатите от всички приключили източници са показани.`)
-      setDeepScanning(false)
-    }else{
-      setMsg(`Първите резултати са готови за ${secs} сек. Бавните източници продължават да добавят оферти, без да блокират работата.`)
-    }
-    if(supError)setMsg(prev=>prev+` Supabase не отговори напълно и резервното търсене е поело публичните сайтове.`)
+    setMsg(finished?'Търсенето приключи за '+secs+' сек. Резултатите са подредени по сайтове.':'Първите резултати са готови за '+secs+' сек. Останалите източници продължават да добавят оферти.')
+    if(supError)setMsg(prev=>prev+' Има неуспешен Supabase източник.')
     setSearching(null);setSearchInfo('')
   }
 
@@ -396,20 +416,21 @@ export default function Buyers(){
 
   async function validateStoredFirmResults(rows:any[]){
     const ids=[...new Set(rows.map((r:any)=>r?.offers?.id).filter(Boolean))]
-    if(!ids.length)return []
-    const activeIds=new Set<string>()
+    if(!ids.length)return rows
+    const activeIds=new Set<string>(),inactiveIds=new Set<string>()
+    // A blocked link or timeout is "not verified", NOT evidence that an offer is inactive.
     for(let i=0;i<ids.length;i+=100){
       try{
-        const {data,error}:any=await supabase.functions.invoke('validate-offer-links',{
-          body:{offer_ids:ids.slice(i,i+100)}
-        })
+        const {data,error}:any=await supabase.functions.invoke('validate-offer-links',{body:{offer_ids:ids.slice(i,i+100)}})
         if(error)continue
-        for(const item of data?.results||[])if(item?.status==='active'&&item?.id)activeIds.add(String(item.id))
+        for(const x of data?.results||[]){
+          if(x?.status==='active')activeIds.add(String(x.id))
+          if(x?.status==='inactive')inactiveIds.add(String(x.id))
+        }
       }catch{}
     }
-    return rows
-      .filter((r:any)=>activeIds.has(String(r?.offers?.id||'')))
-      .map((r:any)=>({...r,_active_validation:'active'}))
+    return rows.filter(r=>!inactiveIds.has(String(r?.offers?.id||'')))
+      .map(r=>({...r,_active_validation:activeIds.has(String(r?.offers?.id||''))?'active':'unknown'}))
   }
 
   async function getStoredMatches(b:any){
@@ -432,22 +453,38 @@ export default function Buyers(){
     return await validateStoredFirmResults(merged)
   }
 
-  async function loadMatches(b:any){
-    setSelected(b)
-    setResultsHidden(false)
-    setResultFilter('all')
-    setResultsLoading(true)
-    setResults([])
-    try{
-      const stored=await getStoredMatches(b)
-      setResults(stored)
-    }finally{setResultsLoading(false)}
+  async function restoreRun(b:any,run:SavedSearch){
+    setSelected(b);setResultsHidden(false);setResultFilter('all')
+    setActiveRun(run);setResults(run.offers||[])
+    setPortalErrors(run.source_errors||{})
   }
 
+  async function loadMatches(b:any){
+    setSelected(b);setResultsHidden(false);setResultFilter('all')
+    setResultsLoading(true);setActiveRun(null);setHistoryWarning('')
+    try{
+      const {data:{user}}=await supabase.auth.getUser()
+      const runs=user?await listBuyerSearches(user.id,b.id):[]
+      setHistory(runs)
+      if(runs.length){await restoreRun(b,runs[0]);return}
+      const stored=await getStoredMatches(b)
+      setResults(stored)
+    }catch(e:any){
+      setHistoryWarning('Не мога да заредя историята от браузъра: '+String(e?.message||e))
+      setResults(await getStoredMatches(b))
+    }finally{setResultsLoading(false)}
+  }
   async function openResults(b:any){
-    // Preserve the just-fetched portal offers while toggling their visibility.
     if(selected?.id===b.id){setResultsHidden(false);return}
     await loadMatches(b)
+  }
+  async function exportPdf(b:any,rows:any[],run?:SavedSearch|null){
+    setExporting(true)
+    try{
+      const{downloadBuyerPdf}=await import('@/lib/search-report')
+      await downloadBuyerPdf(run?.buyer||b,run?.criteria||b?.buyer_searches?.[0]||{},rows,run?.started_at)
+    }catch(e:any){setMsg('PDF справката не можа да се изтегли: '+String(e?.message||e))}
+    finally{setExporting(false)}
   }
 
   const filteredResults=results.filter(r=>resultFilter==='all'||advertiserCategory(r)===resultFilter)
