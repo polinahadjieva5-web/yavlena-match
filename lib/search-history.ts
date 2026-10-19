@@ -90,3 +90,15 @@ export async function listBuyerSearches(userId:string,buyerId:string):Promise<Sa
     tx.oncomplete=()=>db.close()
   })
 }
+
+export async function deleteBuyerSearches(userId:string,buyerId:string):Promise<void>{
+  const db=await openDatabase()
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(STORE,'readwrite')
+    const store=tx.objectStore(STORE)
+    const req=store.index('buyer_id').getAll(buyerId)
+    req.onsuccess=()=>{for(const r of (req.result||[]) as SavedSearch[])if(r.user_id===userId)store.delete(r.id)}
+    tx.oncomplete=()=>{db.close();resolve()}
+    tx.onerror=()=>{db.close();reject(tx.error||new Error('Не може да се изтрие локалната история.'))}
+  })
+}
