@@ -108,6 +108,8 @@ export async function GET(req:NextRequest){
   const priceMax=q.get('price_max')?Number(q.get('price_max')):null
   const areaMin=q.get('area_min')?Number(q.get('area_min')):null
   const areaMax=q.get('area_max')?Number(q.get('area_max')):null
+  const floorMin=q.get('floor_min')?Number(q.get('floor_min')):null
+  const floorMax=q.get('floor_max')?Number(q.get('floor_max')):null
   const wantedConstruction=(q.get('construction')||'').split(',').map(norm).filter(Boolean)
 
   const typeSlug=TYPE_SLUGS[propertyType]||''
@@ -179,6 +181,14 @@ export async function GET(req:NextRequest){
     if(areaMin!=null&&(effectiveArea==null||effectiveArea<areaMin))return null as any
     if(areaMax!=null&&(effectiveArea==null||effectiveArea>areaMax))return null as any
 
+    const labeledFloor=text.match(/(?:^|\s)Етаж\s*:\s*(Партер|[0-9]{1,2})(?:\s*-?(?:ви|ри|ти|ми))?\s*от\s*([0-9]{1,2})/i)
+    const floor=labeledFloor?(norm(labeledFloor[1])==='партер'?0:Number(labeledFloor[1])):null
+    const totalFloors=labeledFloor?Number(labeledFloor[2]):null
+    // When a verified floor conflicts with the buyer's criterion, exclude it.
+    // If unknown, retain it for review rather than inventing a matching floor.
+    if(floorMin!=null&&floor!=null&&floor<floorMin)return null as any
+    if(floorMax!=null&&floor!=null&&floor>floorMax)return null as any
+
     const build=detailOk?construction(text):null
     if(wantedConstruction.length&&build&&!wantedConstruction.includes(norm(build)))return null as any
 
@@ -226,6 +236,8 @@ export async function GET(req:NextRequest){
         district,
         price_eur:effectivePrice,
         area_sqm:effectiveArea,
+        floor,
+        total_floors:totalFloors,
         construction_type:build,
         advertiser_type:advertiserType,
         advertiser_name:advertiserName,
