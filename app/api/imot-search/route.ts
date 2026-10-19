@@ -134,13 +134,9 @@ export async function GET(req:NextRequest){
     if(pos<0)pos=html.indexOf(link.replace(/^https?:\/\/(?:www\.)?imot\.bg/i,''))
     const snippet=pos>=0?html.slice(Math.max(0,pos-1800),pos+5200):''
     return {link,snippet,price:cardPrice(snippet),area:cardArea(snippet)}
-  }).filter(card=>{
-    if(priceMin!=null&&card.price!=null&&card.price<priceMin)return false
-    if(priceMax!=null&&card.price!=null&&card.price>priceMax)return false
-    if(areaMin!=null&&card.area!=null&&card.area<areaMin)return false
-    if(areaMax!=null&&card.area!=null&&card.area>areaMax)return false
-    return true
   })
+  // Do not prefilter by an adjacent card's price/area. A broad HTML snippet
+  // can contain the previous listing, hiding valid private listings.
 
   let detailSuccess=0
   let listFallback=0
@@ -173,7 +169,10 @@ export async function GET(req:NextRequest){
           .map(m=>Number(m[1].replace(',','.')))
           .filter(v=>v>=10&&v<=5000)
       : []
-    const effectiveArea=detailAreas.length?detailAreas[0]:card.area
+    // Imot.bg prints the current listing's structured floor area after "Площ:".
+    // Generic matches over the entire page may refer to advertised similar properties.
+    const labeledArea=text.match(/(?:^|\s)Площ\s*:\s*([0-9]{1,4}(?:[.,][0-9]+)?)\s*(?:m\s*(?:2|²)|кв\.?\s*м)/i)
+    const effectiveArea=labeledArea?Number(labeledArea[1].replace(',','.')):(detailAreas.length?detailAreas[0]:card.area)
 
     if(priceMin!=null&&(effectivePrice==null||effectivePrice<priceMin))return null as any
     if(priceMax!=null&&(effectivePrice==null||effectivePrice>priceMax))return null as any
@@ -186,21 +185,22 @@ export async function GET(req:NextRequest){
     let advertiserType='unknown'
     let advertiserName:string|null=null
     if(detailOk){
+      // Only the listing's seller/contact section can establish the publisher type.
+      // Do not use generic site navigation or unrelated "agency" descriptions.
+      const header=text.slice(0,1800)
+      const contactAt=text.search(/За\s+контакт\s*:/i)
+      const contactSection=contactAt>=0?text.slice(contactAt,contactAt+1650):''
+      const publishedAsPrivate=/\/\s*Частно\s+лице\s*\//i.test(contactSection) ||
+        /Площ\s*:\s*[0-9,.]+\s*(?:кв\.?\s*м|m[²2])\s*,?\s*Частно\s+лице/i.test(header)
+      const publishedAsAgency=/\bАгенция\s*:/i.test(contactSection) ||
+        /\bБрокер\s*:/i.test(contactSection) ||
+        /Площ\s*:\s*[0-9,.]+\s*(?:кв\.?\s*м|m[²2])\s*,?\s*Агенция/i.test(header) ||
+        /Имотът\s+се\s+предлага\s+от\s*:\s*Агенция/i.test(header)
       const dealer=raw.match(/<div class=["']dealer["'][\s\S]*?<\/div>\s*<\/div>/i)?.[0]||''
-      advertiserName=
-        dealer.match(/<div class=["']name["']>([^<]+)<\/div>/i)?.[1]?.trim()||
-        dealer.match(/href=["']https?:\/\/([^."]+)\.imot\.bg/i)?.[1]||
-        null
-      // Missing dealer markup is not proof that the seller is a private person.
-      // Only trust an explicit seller/advertiser label on the detail page.
-      // Imot.bg explicitly displays "/Частно лице/" in the contact section.
-      // Use the publisher's contact label, never generic phrases in the description.
-      const contactAt=text.search(/За контакт\s*:/i)
-      const contactSection=contactAt>=0?text.slice(contactAt,contactAt+900):''
-      const identitySection=text.match(/Имотът се предлага от\s*:?\s*([\s\S]{0,550})/i)?.[1]||''
-      const agencySeller=/агенция\s+в\s+imot\.bg|агенция\s+за\s+недвижими|\/\s*агенция\s*\//i.test(contactSection+' '+identitySection)
-      const privateSellerLabel=/\/\s*частно\s+лице\s*\//i.test(contactSection)||/^(?:\s*частно\s+лице\b|\s*собственик\b)/i.test(identitySection)
-      advertiserType=dealer||agencySeller?'agency':privateSellerLabel?'private':'unknown'
+      advertiserName=dealer.match(/<div class=["']name["']>([^<]+)<\/div>/i)?.[1]?.trim()||
+        contactSection.match(/Агенция\s*:\s*([^\n]{3,90})/i)?.[1]?.trim()||null
+      // Prioritize the site's explicit "Частно лице" marker over unrelated dealer widgets.
+      advertiserType=publishedAsPrivate?'private':publishedAsAgency||dealer?'agency':'unknown'
     }else{
       listFallback++
     }
