@@ -488,10 +488,33 @@ export default function Buyers(){
   }
 
   const filteredResults=results.filter(r=>resultFilter==='all'||advertiserCategory(r)===resultFilter)
+  const portalNames=[...new Set([...PORTAL_NAMES,...results.map(portalName)])]
   const advertiserCounts={
     private:results.filter(r=>advertiserCategory(r)==='private').length,
     agency:results.filter(r=>advertiserCategory(r)==='agency').length,
     unknown:results.filter(r=>advertiserCategory(r)==='unknown').length
+  }
+
+  function offerCard(r:any){
+    const o=r.offers||{}
+    const category=advertiserCategory(r)
+    const seller=category==='private'?'Частно лице':category==='agency'?'Агенция':'Неуточнен подател'
+    const url=String(o.original_url||'')
+    const variants=Array.isArray(r._variants)?r._variants:[]
+    return <div className="offerResult" key={String(r.id)+'|'+url}>
+      <div className="grow">
+        <div className="offerTop">
+          <b>{o.title||o.property_type||'Имотна оферта'}</b>
+          <span className={category==='private'?'pill private':category==='agency'?'pill agency':'pill'}>{seller}</span>
+          <span className="tag">{r._active_validation==='active'?'Проверена оферта':'Статусът не е потвърден'}</span>
+        </div>
+        <div className="meta">{o.district||'Район не е посочен'} · {o.price_eur!=null?Number(o.price_eur).toLocaleString('bg-BG')+' €':'Без цена'} · {o.area_sqm!=null?o.area_sqm+' кв.м':'Без площ'}</div>
+        <div className="meta">Тип: {o.property_type||'—'} · Строителство: {o.construction_type||'—'} · Етаж: {o.floor??'—'} · Година: {o.construction_year??'—'}</div>
+        <div className="meta">Подател: {o.advertiser_name||seller}{o.contact_phone?' · Телефон: '+o.contact_phone:''}{o.source_published_at?' · Публикувана: '+new Date(o.source_published_at).toLocaleDateString('bg-BG'):''}</div>
+        {variants.length>1&&<div className="meta">Публикации в същия източник: {variants.length}</div>}
+      </div>
+      {/^https?:\/\//i.test(url)&&<a className="btn" href={url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Отвори офертата</a>}
+    </div>
   }
 
   return <>
@@ -517,9 +540,53 @@ export default function Buyers(){
       </div>}):<div className="empty" style={{margin:'14px 0'}}>Няма добавени купувачи.</div>}
     </div>
 
-    {selected&&!resultsHidden&&<div className="card resultsCard" id="buyer-results"><div className="toolbar"><div><h2 style={{margin:0}}>Оферти за {selected.full_name}</h2><div className="meta">Показват се всички намерени оферти по критериите на купувача — без лимит на броя. Районът е задължителен.</div><div className="meta" style={{marginTop:5}}>Общо: {results.length} · Частни: {advertiserCounts.private} · Агенции: {advertiserCounts.agency} · Неуточнени: {advertiserCounts.unknown}</div></div><button className="btn" onClick={()=>setResultsHidden(true)}>Скрий резултатите</button></div>
-      <div style={{display:'flex',gap:8,flexWrap:'wrap',margin:'14px 0'}}>{([{id:'all',label:'Всички',count:results.length},{id:'private',label:'Частни',count:advertiserCounts.private},{id:'agency',label:'Агенции',count:advertiserCounts.agency},{id:'unknown',label:'Неуточнени',count:advertiserCounts.unknown}] as const).map(x=><button key={x.id} className={resultFilter===x.id?'btn primary':'btn'} type="button" onClick={()=>setResultFilter(x.id)}>{x.label} ({x.count})</button>)}</div>
-      {resultsLoading?<div className="empty">Зареждам запазените съвпадения...</div>:filteredResults.length?filteredResults.slice().sort((a,b)=>new Date(b.offers?.source_published_at||b.created_at).getTime()-new Date(a.offers?.source_published_at||a.created_at).getTime()).map(r=>{const variants=Array.isArray(r._variants)&&r._variants.length?r._variants:[offerVariant(r)];return <div className="offerResult" key={r.id}><div className="grow"><div className="offerTop"><b>{r.offers?.title||'Имотна оферта'}</b><span className="pill private">{r._active_validation==='active'?'Потвърдена активна':'Активна'}</span><span className={advertiserCategory(r)==='private'?'pill private':advertiserCategory(r)==='agency'?'pill agency':'pill'}>{advertiserCategory(r)==='private'?'Частно лице':advertiserCategory(r)==='agency'?'Агенция':'Неуточнен подател'}</span>{variants.length>1&&<span className="tag">{variants.length} публикации на същия имот</span>}</div><div className="meta">{r.offers?.offer_sources?.name||'Източник'}{r.offers?.advertiser_name?` · Подател: ${r.offers.advertiser_name}`:''} · {r.offers?.district||'—'} · {r.offers?.price_eur?`€${Number(r.offers.price_eur).toLocaleString('bg-BG')}`:'без цена'}{r.offers?.area_sqm?` · ${r.offers.area_sqm} кв.м`:''}{r.offers?.floor!=null?` · ет. ${r.offers.floor}`:''}{r.offers?.construction_type?` · ${r.offers.construction_type}`:''} · съвпадение 100% · {r.offers?.source_published_at?new Date(r.offers.source_published_at).toLocaleString('bg-BG'):'открита при последната проверка'}</div>{variants.length>1&&<div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:8}}>{variants.map((v:any,i:number)=>v.url?<a key={v.url||i} className="btn" href={v.url} target="_blank" rel="noreferrer">{v.source}{v.price?` · €${Number(v.price).toLocaleString('bg-BG')}`:''}{v.area?` · ${v.area} кв.м`:''}</a>:null)}</div>}</div>{variants.length===1&&r.offers?.original_url&&<a className="btn" href={r.offers.original_url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Отвори</a>}</div>}):<div className="empty">{results.length?'Няма оферти в избраната категория.':'Няма заредени оферти. Резултатите от публичните сайтове се запазват при скриване, докато си на тази страница.'}</div>}
+    {selected&&!resultsHidden&&<div className="card resultsCard" id="buyer-results">
+      <div className="toolbar" style={{alignItems:'flex-start'}}>
+        <div>
+          <h2 style={{margin:0}}>Оферти за {selected.full_name}</h2>
+          <div className="meta">По сайтове, с директен достъп до всяка обява. Частните лица се маркират само при достатъчни доказателства.</div>
+          <div className="meta" style={{marginTop:7}}>Общо: <b>{results.length}</b> · Частни: <b>{advertiserCounts.private}</b> · Агенции: <b>{advertiserCounts.agency}</b> · Неуточнени: <b>{advertiserCounts.unknown}</b></div>
+          {activeRun&&<div className="meta">Архивирано търсене от {new Date(activeRun.started_at).toLocaleString('bg-BG')}</div>}
+        </div>
+        <div className="buyerActions" style={{padding:0}}>
+          <button type="button" className="btn primary" onClick={()=>exportPdf(selected,results,activeRun)} disabled={exporting}>{exporting?'Създавам PDF...':'Изтегли справка (PDF)'}</button>
+          <button type="button" className="btn" onClick={()=>setResultsHidden(true)}>Скрий резултатите</button>
+        </div>
+      </div>
+      <div className="historyPanel">
+        <div className="historyTop">
+          <div><strong>История на търсенията</strong><div className="meta">Запазва се на това устройство и в този браузър, включително след презареждане. Не се синхронизира между устройства.</div></div>
+          <span className="tag">{history.length} записа</span>
+        </div>
+        {history.length>0&&<div className="historyEntries">
+          {history.map(run=><button type="button" key={run.id} className={'historyButton '+(activeRun?.id===run.id?'active':'')} onClick={()=>restoreRun(selected,run)}>
+            {new Date(run.started_at).toLocaleString('bg-BG')} · {run.offers.length} оферти {run.status==='running'?'· В процес':run.status==='partial'?'· Частично':''}
+          </button>)}
+        </div>}
+      </div>
+      {historyWarning&&<div className="err" role="alert">{historyWarning}</div>}
+      <div className="filterBar">{([{id:'all',label:'Всички',count:results.length},{id:'private',label:'Частни лица',count:advertiserCounts.private},{id:'agency',label:'Агенции',count:advertiserCounts.agency},{id:'unknown',label:'Неуточнени',count:advertiserCounts.unknown}] as const).map(x=><button key={x.id} className={resultFilter===x.id?'btn primary':'btn'} type="button" onClick={()=>setResultFilter(x.id)}>{x.label} ({x.count})</button>)}</div>
+      {resultsLoading?<div className="empty">Зареждам запазените търсения...</div>:
+      <div className="portalList">
+        {portalNames.map(name=>{
+          const found=filteredResults.filter(r=>portalName(r)===name).slice().sort((a,b)=>new Date(b.offers?.source_published_at||b.created_at).getTime()-new Date(a.offers?.source_published_at||a.created_at).getTime())
+          const allFromPortal=results.filter(r=>portalName(r)===name)
+          const privateCount=allFromPortal.filter(r=>advertiserCategory(r)==='private').length
+          return <details className="portalDetails" key={name}>
+            <summary className="portalSummary">
+              <span className="portalName">{name}</span>
+              <span className="portalCount">{found.length} оферти</span>
+              <span className="portalPrivate">{privateCount} частни</span>
+              {portalErrors[name]&&<span className="portalError">Проблем с източника</span>}
+              <span className="portalArrow">⌄</span>
+            </summary>
+            <div className="portalOffers">
+              {portalErrors[name]&&<div className="err">{portalErrors[name]}</div>}
+              {found.length?found.map(offerCard):<div className="empty">{resultFilter==='all'?'При това търсене няма намерени оферти от този сайт.':'Няма оферти от избраната категория за този сайт.'}</div>}
+            </div>
+          </details>
+        })}
+      </div>}
     </div>}
 
     {open&&<div className="modalBack"><form className="modal" onSubmit={saveBuyer}><div className="modalHead"><div><div className="eyebrow">{editing?'Редакция на клиент':'Нов клиент'}</div><h2 style={{margin:'4px 0'}}>Подробни критерии за търсене</h2></div><button type="button" className="x" onClick={()=>setOpen(false)}><X size={18}/></button></div>
