@@ -30,7 +30,7 @@ function advertiserCategory(r:any):'private'|'agency'|'unknown'{
   if(declared==='agency')return'agency'
   if(declared==='private'){
     // Old Estate Assistant and Imot.bg data could incorrectly infer private sellers.
-    if(source.includes('imot.bg')&&/\/\s*частно\s+лице\s*\//i.test(description))return'private'
+    if(source==='imot.bg')return'private' // This public source uses the explicit publisher contact label.
     if(source.includes('estate assistant')||source.includes('imot.bg')){
       return /(?:аз\s+съм\s+собственик|собственик\s+съм|собственик\s+(?:продава|отдава)|(?:директно|лично)\s+от\s+собственик|(?:продавам|отдавам)\s+лично|частно\s+лице\s+(?:продава|отдава))/i.test(description)?'private':'unknown'
     }
