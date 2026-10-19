@@ -10,3 +10,31 @@
 .multiOption{display:flex!important;align-items:center;gap:9px;padding:8px 9px;border-radius:7px;cursor:pointer;font-size:13px!important;color:var(--ink)!important;font-weight:600!important}
 .multiOption:hover{background:var(--soft)}
 .multiOption input{width:16px;height:16px;margin:0;padding:0}
+
+
+/* Buyer results: clear source-by-source folders and a compact saved-search history */
+.filterBar{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}
+.portalList{display:grid;gap:11px}
+.portalDetails{border:1px solid #dae5dc;background:#fff;border-radius:13px;overflow:hidden}
+.portalDetails[open]{border-color:#9ccbae;box-shadow:0 4px 18px rgba(23,107,69,.07)}
+.portalSummary{list-style:none;display:flex;align-items:center;gap:12px;cursor:pointer;padding:15px 17px;background:#f7faf8;flex-wrap:wrap}
+.portalSummary::-webkit-details-marker{display:none}
+.portalSummary:hover{background:#edf7ef}
+.portalName{font-weight:800;font-size:15px;min-width:140px;color:#1b3024}
+.portalCount{font-size:12px;font-weight:800;border-radius:20px;background:#e1eee5;color:#176b45;padding:6px 10px}
+.portalPrivate{font-size:12px;color:#31784f;font-weight:700}
+.portalError{font-size:11px;color:#a54437;background:#fff0eb;border-radius:8px;padding:5px 8px}
+.portalArrow{margin-left:auto;color:#276a46;font-size:22px;line-height:1;transition:transform .2s}
+.portalDetails[open] .portalArrow{transform:rotate(180deg)}
+.portalOffers{padding:8px 18px 17px}
+.portalOffers .offerResult{align-items:flex-start;gap:16px;min-width:0}
+.portalOffers .offerResult .grow{min-width:0}
+.portalOffers .offerTop{justify-content:flex-start;margin-bottom:6px}
+.portalOffers .offerTop b{margin-right:auto}
+.historyPanel{border:1px solid #e0e9e0;border-radius:12px;padding:13px 15px;background:#f7faf7}
+.historyTop{display:flex;justify-content:space-between;gap:12px;align-items:center}
+.historyTop strong{font-size:13px}
+.historyEntries{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;max-height:145px;overflow:auto}
+.historyButton{border:1px solid #d0e0d5;background:#fff;border-radius:9px;padding:8px 10px;cursor:pointer;color:#3c5043;font-size:12px}
+.historyButton:hover,.historyButton.active{border-color:#176b45;color:#176b45;background:#e7f5ec}
+@media(max-width:650px){.portalSummary{gap:8px}.portalName{min-width:0;flex:1}.portalOffers{padding:8px 11px}.portalArrow{margin-left:0}.historyTop{align-items:flex-start}.resultsCard .toolbar{flex-direction:column}}
