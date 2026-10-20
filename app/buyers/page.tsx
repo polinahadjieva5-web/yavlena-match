@@ -652,7 +652,7 @@ export default function Buyers(){
       {deepScanning&&!searching&&<div className="meta" style={{marginTop:4}}>Можеш да работиш със сайта — допълнителните страници се проверяват без да блокират екрана.</div>}
     </div>}
     {msg&&<div className={msg.startsWith('Готово')?'ok':'err'} style={{marginBottom:14}}>{msg}</div>}
-    {sourceStatus&&<div className="meta" style={{margin:'-4px 0 14px'}}>Фирмени източници: {sourceStatus}</div>
+    {sourceStatus&&<div className="meta" style={{margin:'-4px 0 14px'}}>Фирмени източници: {sourceStatus}</div>}
 
     <div className="card" style={{marginBottom:15}}>
       <div className="toolbar" style={{marginBottom:0}}>
@@ -680,7 +680,6 @@ export default function Buyers(){
         </>}
       </>}
     </div>
-}
     {supabaseIssues.length>0&&<div className="err" style={{marginBottom:14}}>Непълни Supabase източници: {supabaseIssues.join(' · ')}</div>}
 
     <div className="listCard">
