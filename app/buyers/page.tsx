@@ -377,30 +377,66 @@ export default function Buyers(){
 
     let supError:any=null
     let supData:any=null
+    let serverRunId:string|null=null
+    try{
+      const {data,error}:any=await timed(supabase.functions.invoke('buyer-search-archive',{
+        body:{action:'start',buyer_id:b.id}
+      }) as any,15000,'Запазване на сървърната история')
+      if(error||!data?.ok)throw error||new Error(data?.error||'Невъзможен запис')
+      serverRunId=data.run_id
+    }catch(e:any){setHistoryWarning('Не може да се запише търсенето в Supabase: '+String(e?.message||e)+'. Локалната история остава достъпна.')}
+    const persistOffers=async(rows:any[])=>{
+      await appendSearchOffers(archiveId,rows)
+      if(!serverRunId)return
+      for(let pos=0;pos<rows.length;pos+=60){
+        const chunk=rows.slice(pos,pos+60)
+        const {data,error}:any=await supabase.functions.invoke('buyer-search-archive',{
+          body:{action:'append',buyer_id:b.id,run_id:serverRunId,items:chunk}
+        })
+        if(error||!data?.ok)throw error||new Error(data?.error||'Неуспешно съхранение')
+      }
+    }
     const supTask=(async()=>{
-      try{
-        const{data,error}:any=await timed(
-          supabase.functions.invoke('portal-search',{body:{buyer_id:b.id,run_type:'manual'}}) as any,
-          95000,'Supabase търсенето'
-        )
-        if(error)supError=error
-        else if(data?.ok===false)supError=new Error(String(data.error||'Източниците не отговориха'))
-        else if(!data?.ok)supError=new Error('Supabase не потвърди приключването на търсенето.')
-        else supData=data
-      }catch(e:any){supError=e}
-      const stored=await getStoredMatches(b)
-      setResults(prev=>mergeResults(prev,stored))
-      try{await appendSearchOffers(archiveId,stored)}catch(e:any){setHistoryWarning('Не всички резултати са записани в историята. '+String(e?.message||e))}
+      const endpoints=[
+        {slug:'public-portal-search',name:'Публични портали',timeout:125000},
+        {slug:'estate-assistant-search',name:'Estate Assistant',timeout:145000},
+        {slug:'imot-firm-search',name:'Imot.bg firm',timeout:125000},
+        {slug:'yavlena-search',name:'Yavlena.com',timeout:60000}
+      ]
+      const stats:any[]=await Promise.all(endpoints.map(async ep=>{
+        try{
+          const {data,error}:any=await timed(supabase.functions.invoke(ep.slug,{
+            body:{buyer_id:b.id,run_type:'manual'}
+          }) as any,ep.timeout,ep.name)
+          if(error||!data?.ok)throw error||new Error(data?.error||'Върнат е неуспешен резултат')
+          const stored=await getStoredMatches(b)
+          setResults(prev=>mergeResults(prev,stored))
+          try{await appendSearchOffers(archiveId,stored)}catch{}
+          if(ep.slug==='public-portal-search')return data?.portal_stats||[]
+          return [{source:ep.name,status:'ok',count:Number(data?.total||0),pages_scanned:data?.pages_scanned}]
+        }catch(e:any){
+          return [{source:ep.name,status:'error',count:0,error:String(e?.message||e)}]
+        }
+      }))
+      supData={portal_stats:stats.flat()}
+      const fails=supData.portal_stats.filter((x:any)=>x.status&&x.status!=='ok')
+      if(fails.length)supError=new Error(fails.map((x:any)=>x.source+': '+(x.error||x.status)).join(' · '))
     })()
     const fallbackTask=(async()=>{
       try{
-        const found=await loadFallbackResults(criteria,rows=>appendSearchOffers(archiveId,rows))
+        const found=await loadFallbackResults(criteria,persistOffers)
         setResults(prev=>mergeResults(prev,found))
       }catch(e:any){setHistoryWarning('Част от публичните източници не се заредиха: '+String(e?.message||e))}
       finally{setDeepScanning(false)}
     })()
     const allDone=Promise.allSettled([supTask,fallbackTask]).then(async()=>{
       try{
+        if(serverRunId){
+          const {data,error}:any=await supabase.functions.invoke('buyer-search-archive',{
+            body:{action:'finish',buyer_id:b.id,run_id:serverRunId,partial:!!supError}
+          })
+          if(error||!data?.ok)setHistoryWarning('Supabase не успя да финализира историята: '+String(error?.message||data?.error||''))
+        }
         await completeSearchRun(archiveId,supError?'partial':'completed')
         const runs=await listBuyerSearches(user.id,b.id)
         setHistory(runs)
@@ -409,7 +445,7 @@ export default function Buyers(){
     })
     const finished=await Promise.race([
       allDone.then(()=>true),
-      new Promise<boolean>(resolve=>setTimeout(()=>resolve(false),120000))
+      new Promise<boolean>(resolve=>setTimeout(()=>resolve(false),160000))
     ])
     const stats=supData?.portal_stats||supData?.sources||supData?.stats||null
     if(stats&&typeof stats==='object'){
