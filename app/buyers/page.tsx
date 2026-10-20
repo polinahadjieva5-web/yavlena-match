@@ -139,6 +139,11 @@ export default function Buyers(){
   const[portalProgress,setPortalProgress]=useState<Record<string,{pages:number;found:number;private:number;details:number;raw:number;status:string}>>({})
   const[supabaseIssues,setSupabaseIssues]=useState<string[]>([])
   const[exporting,setExporting]=useState(false)
+  const[showPrivateCatalog,setShowPrivateCatalog]=useState(false)
+  const[privateCatalog,setPrivateCatalog]=useState<any[]>([])
+  const[loadingPrivateCatalog,setLoadingPrivateCatalog]=useState(false)
+  const[privateCatalogError,setPrivateCatalogError]=useState('')
+  const[privateCatalogTab,setPrivateCatalogTab]=useState<'private'|'unverified'>('private')
 
   async function load(){
     const{data:{user}}=await supabase.auth.getUser()
@@ -585,6 +590,31 @@ export default function Buyers(){
     unknown:results.filter(r=>advertiserCategory(r)==='unknown').length
   }
 
+
+  async function openPrivateCatalog(){
+    if(showPrivateCatalog){setShowPrivateCatalog(false);return}
+    setShowPrivateCatalog(true)
+    setLoadingPrivateCatalog(true)
+    setPrivateCatalogError('')
+    try{
+      const data:any[]=[]
+      // Supabase caps individual responses. Page through the entire authorized catalog,
+      // never restrict to a fixed number of records.
+      for(let from=0;;from+=800){
+        const {data:page,error}:any=await supabase.from('offers')
+          .select('*,offer_sources(name)')
+          .in('advertiser_type',['private','unknown'])
+          .eq('is_active',true)
+          .order('last_seen_at',{ascending:false})
+          .range(from,from+799)
+        if(error)throw error
+        data.push(...(page||[]).map((o:any)=>({id:o.id,offers:o,created_at:o.last_seen_at})))
+        if((page||[]).length<800)break
+      }
+      setPrivateCatalog(data)
+    }catch(e:any){setPrivateCatalogError('Неуспешно зареждане на каталога: '+String(e?.message||e))}
+    finally{setLoadingPrivateCatalog(false)}
+  }
   function offerCard(r:any){
     const o=r.offers||{}
     const category=advertiserCategory(r)
@@ -622,7 +652,35 @@ export default function Buyers(){
       {deepScanning&&!searching&&<div className="meta" style={{marginTop:4}}>Можеш да работиш със сайта — допълнителните страници се проверяват без да блокират екрана.</div>}
     </div>}
     {msg&&<div className={msg.startsWith('Готово')?'ok':'err'} style={{marginBottom:14}}>{msg}</div>}
-    {sourceStatus&&<div className="meta" style={{margin:'-4px 0 14px'}}>Фирмени източници: {sourceStatus}</div>}
+    {sourceStatus&&<div className="meta" style={{margin:'-4px 0 14px'}}>Фирмени източници: {sourceStatus}</div>
+
+    <div className="card" style={{marginBottom:15}}>
+      <div className="toolbar" style={{marginBottom:0}}>
+        <div><h2 style={{margin:'0 0 5px'}}>Частни обяви — общ каталог</h2>
+        <div className="meta">Всички налични активни частни обяви от свързаните източници — без ограничения от критериите на конкретен купувач. Съмнителните податели са отделно за проверка.</div></div>
+        <button className="btn primary" type="button" onClick={openPrivateCatalog}>{showPrivateCatalog?'Затвори каталога':'Виж всички частни обяви'}</button>
+      </div>
+      {showPrivateCatalog&&<>
+        {loadingPrivateCatalog&&<div className="meta" style={{marginTop:14}}>Зареждам всички записи от базата, страница по страница...</div>}
+        {privateCatalogError&&<div className="err">{privateCatalogError}</div>}
+        {!loadingPrivateCatalog&&!privateCatalogError&&<>
+          <div className="filterBar" style={{marginBottom:12}}>
+            <button className={privateCatalogTab==='private'?'btn primary':'btn'} onClick={()=>setPrivateCatalogTab('private')}>Частни лица ({privateCatalog.filter(r=>advertiserCategory(r)==='private').length})</button>
+            <button className={privateCatalogTab==='unverified'?'btn primary':'btn'} onClick={()=>setPrivateCatalogTab('unverified')}>Неуточнени податели ({privateCatalog.filter(r=>advertiserCategory(r)==='unknown').length})</button>
+          </div>
+          <div className="meta" style={{margin:'0 0 12px'}}>Това е каталог, не списък със съвпадения за избрания купувач. Подателите и активността се определят според наличните данни.</div>
+          <div className="portalList">{[...new Set(privateCatalog.map(portalName))].map(source=>{
+            const subset=privateCatalog.filter(r=>portalName(r)===source&&advertiserCategory(r)===(privateCatalogTab==='private'?'private':'unknown'))
+            if(!subset.length)return null
+            return <details className="portalDetails" key={source}><summary className="portalSummary">
+              <span className="portalName">{source}</span><span className="portalCount">{subset.length} обяви</span><span className="portalArrow">⌄</span>
+            </summary><div className="portalOffers">{subset.map(offerCard)}</div></details>
+          })}</div>
+          {!privateCatalog.filter(r=>advertiserCategory(r)===(privateCatalogTab==='private'?'private':'unknown')).length&&<div className="empty">Няма запазени активни оферти в тази категория. Това не означава, че няма оферти онлайн.</div>}
+        </>}
+      </>}
+    </div>
+}
     {supabaseIssues.length>0&&<div className="err" style={{marginBottom:14}}>Непълни Supabase източници: {supabaseIssues.join(' · ')}</div>}
 
     <div className="listCard">
