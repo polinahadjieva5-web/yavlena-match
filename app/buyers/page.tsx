@@ -438,7 +438,7 @@ export default function Buyers(){
           if(error||!data?.ok)setHistoryWarning('Supabase не успя да финализира историята: '+String(error?.message||data?.error||''))
         }
         await completeSearchRun(archiveId,supError?'partial':'completed')
-        const runs=await listBuyerSearches(user.id,b.id)
+        const runs=await searchHistory(b,user.id)
         setHistory(runs)
         setActiveRun(prev=>prev?.id===archiveId?runs.find(x=>x.id===archiveId)||prev:prev)
       }catch(e:any){setHistoryWarning('Историята не може да се обнови: '+String(e?.message||e))}
@@ -507,10 +507,46 @@ export default function Buyers(){
     return await validateStoredFirmResults(merged)
   }
 
+  async function serverSearchHistory(b:any,userId:string):Promise<SavedSearch[]>{
+    try{
+      const {data,error}:any=await supabase.functions.invoke('buyer-search-archive',{body:{action:'history',buyer_id:b.id}})
+      if(error||!data?.ok)throw error||new Error(data?.error||'Няма достъп до историята')
+      return (data.runs||[]).map((r:any)=>({
+        id:r.id,user_id:userId,buyer_id:b.id,started_at:r.started_at,completed_at:r.completed_at||undefined,
+        status:r.status==='completed'?'completed':r.status==='running'?'running':'partial',
+        buyer:r.buyer_search_snapshots?.buyer_snapshot||b,
+        criteria:r.buyer_search_snapshots?.criteria_snapshot||b.buyer_searches?.[0]||{},
+        offers:[],_server:true,_offer_count:Number(r.results_count||0)
+      } as SavedSearch))
+    }catch(e:any){
+      setHistoryWarning('Сървърната история не се зареди: '+String(e?.message||e))
+      return []
+    }
+  }
+  async function searchHistory(b:any,userId:string){
+    const local=await listBuyerSearches(userId,b.id).catch(()=>[] as SavedSearch[])
+    const remote=await serverSearchHistory(b,userId)
+    const combined=[...local,...remote.filter((r:any)=>!local.some(l=>Math.abs(new Date(l.started_at).getTime()-new Date(r.started_at).getTime())<5000))]
+    return combined.sort((a,b)=>b.started_at.localeCompare(a.started_at))
+  }
   async function restoreRun(b:any,run:SavedSearch){
     setSelected(b);setResultsHidden(false);setResultFilter('all')
-    setActiveRun(run);setResults(run.offers||[])
-    setPortalErrors(run.source_errors||{})
+    setActiveRun(run);setPortalErrors(run.source_errors||{})
+    if(!(run as any)._server){setResults(run.offers||[]);return}
+    setResultsLoading(true);setResults([])
+    try{
+      const all:any[]=[]
+      for(let offset=0;;offset+=500){
+        const{data,error}:any=await supabase.functions.invoke('buyer-search-archive',{
+          body:{action:'results',buyer_id:b.id,run_id:run.id,offset}
+        })
+        if(error||!data?.ok)throw error||new Error(data?.error||'Неуспешно зареждане')
+        all.push(...(data.items||[]))
+        if(!data.has_more)break
+      }
+      setResults(mergeResults(all))
+    }catch(e:any){setHistoryWarning('Не можах да заредя архивираните оферти от Supabase: '+String(e?.message||e))}
+    finally{setResultsLoading(false)}
   }
 
   async function loadMatches(b:any){
@@ -518,7 +554,7 @@ export default function Buyers(){
     setResultsLoading(true);setActiveRun(null);setHistoryWarning('')
     try{
       const {data:{user}}=await supabase.auth.getUser()
-      const runs=user?await listBuyerSearches(user.id,b.id):[]
+      const runs=user?await searchHistory(b,user.id):[]
       setHistory(runs)
       if(runs.length){await restoreRun(b,runs[0]);return}
       const stored=await getStoredMatches(b)
@@ -616,7 +652,7 @@ export default function Buyers(){
         </div>
         {history.length>0&&<div className="historyEntries">
           {history.map(run=><button type="button" key={run.id} className={'historyButton '+(activeRun?.id===run.id?'active':'')} onClick={()=>restoreRun(selected,run)}>
-            {new Date(run.started_at).toLocaleString('bg-BG')} · {run.offers.length} оферти {run.status==='running'?'· В процес':run.status==='partial'?'· Частично':''}
+            {new Date(run.started_at).toLocaleString('bg-BG')} · {(run as any)._offer_count??run.offers.length} оферти {(run as any)._server?'· Supabase':''} {run.status==='running'?'· В процес':run.status==='partial'?'· Частично':''}
           </button>)}
         </div>}
       </div>
