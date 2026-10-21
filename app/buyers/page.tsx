@@ -418,7 +418,7 @@ export default function Buyers(){
           if(error||!data?.ok)throw error||new Error(data?.error||'Върнат е неуспешен резултат')
           const stored=await getStoredMatches(b)
           setResults(prev=>mergeResults(prev,stored))
-          try{await appendSearchOffers(archiveId,stored)}catch{}
+          try{await persistOffers(stored)}catch(e:any){setHistoryWarning('Част от резултатите от '+ep.name+' не се записаха в архива: '+String(e?.message||e))}
           if(ep.slug==='public-portal-search')return data?.portal_stats||[]
           return [{source:ep.name,status:'ok',count:Number(data?.total||0),pages_scanned:data?.pages_scanned}]
         }catch(e:any){
