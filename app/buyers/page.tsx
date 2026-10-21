@@ -139,11 +139,6 @@ export default function Buyers(){
   const[portalProgress,setPortalProgress]=useState<Record<string,{pages:number;found:number;private:number;details:number;raw:number;status:string}>>({})
   const[supabaseIssues,setSupabaseIssues]=useState<string[]>([])
   const[exporting,setExporting]=useState(false)
-  const[showPrivateCatalog,setShowPrivateCatalog]=useState(false)
-  const[privateCatalog,setPrivateCatalog]=useState<any[]>([])
-  const[loadingPrivateCatalog,setLoadingPrivateCatalog]=useState(false)
-  const[privateCatalogError,setPrivateCatalogError]=useState('')
-  const[privateCatalogTab,setPrivateCatalogTab]=useState<'private'|'unverified'>('private')
 
   async function load(){
     const{data:{user}}=await supabase.auth.getUser()
@@ -186,6 +181,7 @@ export default function Buyers(){
     e.preventDefault();setBusy(true);setMsg('')
     if(!split(f.districts).length){setMsg('Избери поне един район.');setBusy(false);return}
     const{data:{user}}=await supabase.auth.getUser();if(!user){setBusy(false);return}
+    let newlyCreated:any=null
     if(editing){
       const{error:be}=await supabase.from('buyers').update({full_name:f.full_name,phone:f.phone||null,email:f.email||null,notes:f.notes||null,updated_at:new Date().toISOString()}).eq('id',editing.id)
       if(be){setMsg(be.message);setBusy(false);return}
@@ -197,10 +193,16 @@ export default function Buyers(){
     }else{
       const{data:b,error}=await supabase.from('buyers').insert({broker_id:user.id,full_name:f.full_name,phone:f.phone||null,email:f.email||null,notes:f.notes||null}).select().single()
       if(error){setMsg(error.message);setBusy(false);return}
-      const{error:se}=await supabase.from('buyer_searches').insert({...searchPayload(),buyer_id:b.id})
+      const{data:search,error:se}=await supabase.from('buyer_searches').insert({...searchPayload(),buyer_id:b.id}).select().single()
       if(se){setMsg(se.message);setBusy(false);return}
+      newlyCreated={...b,buyer_searches:[search]}
     }
     setOpen(false);setEditing(null);setF(empty);setBusy(false);await load()
+    if(newlyCreated){
+      // Start a real per-buyer search automatically after saving the criteria.
+      // The server archive stores the findings and individual source statuses.
+      void searchNow(newlyCreated)
+    }
   }
 
   async function deleteBuyer(b:any){
@@ -591,30 +593,6 @@ export default function Buyers(){
   }
 
 
-  async function openPrivateCatalog(){
-    if(showPrivateCatalog){setShowPrivateCatalog(false);return}
-    setShowPrivateCatalog(true)
-    setLoadingPrivateCatalog(true)
-    setPrivateCatalogError('')
-    try{
-      const data:any[]=[]
-      // Supabase caps individual responses. Page through the entire authorized catalog,
-      // never restrict to a fixed number of records.
-      for(let from=0;;from+=800){
-        const {data:page,error}:any=await supabase.from('offers')
-          .select('*,offer_sources(name)')
-          .in('advertiser_type',['private','unknown'])
-          .eq('is_active',true)
-          .order('last_seen_at',{ascending:false})
-          .range(from,from+799)
-        if(error)throw error
-        data.push(...(page||[]).map((o:any)=>({id:o.id,offers:o,created_at:o.last_seen_at})))
-        if((page||[]).length<800)break
-      }
-      setPrivateCatalog(data)
-    }catch(e:any){setPrivateCatalogError('Неуспешно зареждане на каталога: '+String(e?.message||e))}
-    finally{setLoadingPrivateCatalog(false)}
-  }
   function offerCard(r:any){
     const o=r.offers||{}
     const category=advertiserCategory(r)
@@ -639,12 +617,12 @@ export default function Buyers(){
   }
 
   return <>
-    <div className="topline"><div><div className="eyebrow">Клиентски търсения</div><h1>Моите купувачи</h1><div className="subtitle">Подробни критерии, фирмени източници, история и постоянен мониторинг. · Търсене v4</div></div><button className="btn primary" onClick={openCreate}><Plus size={17}/>Добави купувач</button></div>
+    <div className="topline"><div><div className="eyebrow">Клиентски търсения</div><h1>Моите купувачи</h1><div className="subtitle">Търсене за всеки купувач по сайтовете, с частни лица, оригинални линкове и история.</div></div><button className="btn primary" onClick={openCreate}><Plus size={17}/>Добави купувач</button></div>
     {searchInfo&&<div className="ok" style={{marginBottom:10}}>{searchInfo}</div>}
     {(searching||deepScanning)&&<div className="card" style={{marginBottom:14,padding:14}}>
       <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',alignItems:'center'}}>
         <b>{searching?'Търся оферти...':'Допълвам още оферти...'}</b>
-        <span className="tag">Търсене v4 · без лимит на офертите</span>
+        <span className="tag">Търсене по източници · без изкуствен лимит на резултатите</span>
       </div>
       <div className="meta" style={{marginTop:8}}>Приключили публични източници: {searchProgress.done} от 7</div>
       <div className="meta" style={{marginTop:4}}>В момента: {searchProgress.label||'Supabase и публичните източници работят паралелно'}</div>
@@ -654,38 +632,12 @@ export default function Buyers(){
     {msg&&<div className={msg.startsWith('Готово')?'ok':'err'} style={{marginBottom:14}}>{msg}</div>}
     {sourceStatus&&<div className="meta" style={{margin:'-4px 0 14px'}}>Фирмени източници: {sourceStatus}</div>}
 
-    <div className="card" style={{marginBottom:15}}>
-      <div className="toolbar" style={{marginBottom:0}}>
-        <div><h2 style={{margin:'0 0 5px'}}>Частни обяви — общ каталог</h2>
-        <div className="meta">Всички налични активни частни обяви от свързаните източници — без ограничения от критериите на конкретен купувач. Съмнителните податели са отделно за проверка.</div></div>
-        <button className="btn primary" type="button" onClick={openPrivateCatalog}>{showPrivateCatalog?'Затвори каталога':'Виж всички частни обяви'}</button>
-      </div>
-      {showPrivateCatalog&&<>
-        {loadingPrivateCatalog&&<div className="meta" style={{marginTop:14}}>Зареждам всички записи от базата, страница по страница...</div>}
-        {privateCatalogError&&<div className="err">{privateCatalogError}</div>}
-        {!loadingPrivateCatalog&&!privateCatalogError&&<>
-          <div className="filterBar" style={{marginBottom:12}}>
-            <button className={privateCatalogTab==='private'?'btn primary':'btn'} onClick={()=>setPrivateCatalogTab('private')}>Частни лица ({privateCatalog.filter(r=>advertiserCategory(r)==='private').length})</button>
-            <button className={privateCatalogTab==='unverified'?'btn primary':'btn'} onClick={()=>setPrivateCatalogTab('unverified')}>Неуточнени податели ({privateCatalog.filter(r=>advertiserCategory(r)==='unknown').length})</button>
-          </div>
-          <div className="meta" style={{margin:'0 0 12px'}}>Това е каталог, не списък със съвпадения за избрания купувач. Подателите и активността се определят според наличните данни.</div>
-          <div className="portalList">{[...new Set(privateCatalog.map(portalName))].map(source=>{
-            const subset=privateCatalog.filter(r=>portalName(r)===source&&advertiserCategory(r)===(privateCatalogTab==='private'?'private':'unknown'))
-            if(!subset.length)return null
-            return <details className="portalDetails" key={source}><summary className="portalSummary">
-              <span className="portalName">{source}</span><span className="portalCount">{subset.length} обяви</span><span className="portalArrow">⌄</span>
-            </summary><div className="portalOffers">{subset.map(offerCard)}</div></details>
-          })}</div>
-          {!privateCatalog.filter(r=>advertiserCategory(r)===(privateCatalogTab==='private'?'private':'unknown')).length&&<div className="empty">Няма запазени активни оферти в тази категория. Това не означава, че няма оферти онлайн.</div>}
-        </>}
-      </>}
-    </div>
     {supabaseIssues.length>0&&<div className="err" style={{marginBottom:14}}>Непълни Supabase източници: {supabaseIssues.join(' · ')}</div>}
 
     <div className="listCard">
       {buyers.length?buyers.map(b=>{const s=b.buyer_searches?.[0];return <div className="buyerBlock" key={b.id}>
         <div className="buyerRow"><span className="statusDot"/><div className="grow"><b>{b.full_name}</b><div className="meta">{(s?.property_types||[]).join(', ')||'Имот'} · {(s?.districts||[]).join(', ')||'Всички райони'} · {s?.price_min?`от €${Number(s.price_min).toLocaleString('bg-BG')} · `:''}{s?.price_max?`до €${Number(s.price_max).toLocaleString('bg-BG')}`:'без горен лимит'}{s?.area_min?` · от ${s.area_min} кв.м`:''}{s?.area_max?` · до ${s.area_max} кв.м`:''}</div><div className="meta">{s?.floor_min!=null?`етаж от ${s.floor_min} · `:''}{s?.floor_max!=null?`етаж до ${s.floor_max} · `:''}{(s?.construction_types||[]).length?`${s.construction_types.join(', ')} · `:''}{s?.year_min?`след ${s.year_min} г. · `:''}{s?.last_manual_search_at?`последно търсене ${new Date(s.last_manual_search_at).toLocaleString('bg-BG')}`:'няма стартирано търсене'}</div></div><span className="tag">{s?.monitoring_enabled?'Мониторинг включен':'Мониторинг изключен'}</span></div>
-        <div className="buyerActions"><button className="btn primary" onClick={()=>searchNow(b)} disabled={searching===b.id}><Search size={16}/>{searching===b.id?'Търся по всички критерии...':'Потърси оферти'}</button><button className="btn" onClick={()=>openResults(b)}>{selected?.id===b.id&&resultsHidden?'Покажи резултатите':'Виж резултати'}</button><button className="btn" onClick={()=>loadMatches(b)}>История на търсенията</button><button className="btn" onClick={()=>toggleMonitoring(b)}>{s?.monitoring_enabled?<BellOff size={16}/>:<Bell size={16}/>} {s?.monitoring_enabled?'Спри известия':'Включи известия'}</button><button className="btn" onClick={()=>openEdit(b)}><Pencil size={15}/>Редактирай</button><button className="btn" onClick={()=>deleteBuyer(b)}><Trash2 size={15}/>Изтрий</button></div>
+        <div className="buyerActions"><button className="btn primary" onClick={()=>searchNow(b)} disabled={searching===b.id}><Search size={16}/>{searching===b.id?'Проверявам сайтовете...':'Търси в сайтовете'}</button><button className="btn" onClick={()=>openResults(b)}>{selected?.id===b.id&&resultsHidden?'Покажи резултатите':'Виж резултати'}</button><button className="btn" onClick={()=>loadMatches(b)}>История на търсенията</button><button className="btn" onClick={()=>toggleMonitoring(b)}>{s?.monitoring_enabled?<BellOff size={16}/>:<Bell size={16}/>} {s?.monitoring_enabled?'Спри известия':'Включи известия'}</button><button className="btn" onClick={()=>openEdit(b)}><Pencil size={15}/>Редактирай</button><button className="btn" onClick={()=>deleteBuyer(b)}><Trash2 size={15}/>Изтрий</button></div>
       </div>}):<div className="empty" style={{margin:'14px 0'}}>Няма добавени купувачи.</div>}
     </div>
 
