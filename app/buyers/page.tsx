@@ -612,7 +612,7 @@ export default function Buyers(){
         <div className="meta">Подател: {o.advertiser_name||seller}{o.contact_phone?' · Телефон: '+o.contact_phone:''}{o.source_published_at?' · Публикувана: '+new Date(o.source_published_at).toLocaleDateString('bg-BG'):''}</div>
         {variants.length>1&&<div className="meta">Публикации в същия източник: {variants.length}</div>}
       </div>
-      {/^https?:\/\//i.test(url)&&<a className="btn" href={url} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Отвори офертата</a>}
+      {/^https?:\/\//i.test(url)&&<a className="btn" href={url} target="_blank" rel="noopener noreferrer"><ExternalLink size={15}/>Отвори в нов таб</a>}
     </div>
   }
 
