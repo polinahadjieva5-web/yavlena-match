@@ -19,7 +19,9 @@ function offerSnapshot(item:any){
   const o=item?.offers||{}
   return {
     id:String(item?.id||o.id||o.original_url||''),
-    score:Number(item?.score||100),created_at:item?.created_at||new Date().toISOString(),
+    score:Number(item?.score??100),created_at:item?.created_at||new Date().toISOString(),
+    _local_verification:item?._local_verification||null,
+    _local_notes:Array.isArray(item?._local_notes)?item._local_notes.slice(0,15):[],
     offers:{
       id:o.id||null,title:o.title||null,description:String(o.description||'').slice(0,2500),
       original_url:o.original_url||null,property_type:o.property_type||null,
@@ -29,6 +31,7 @@ function offerSnapshot(item:any){
       construction_year:o.construction_year??null,has_act16:o.has_act16??null,
       has_elevator:o.has_elevator??null,has_parking:o.has_parking??null,
       advertiser_type:o.advertiser_type||'unknown',advertiser_name:o.advertiser_name||null,
+      raw_payload:o.raw_payload||{},
       contact_phone:o.contact_phone||null,source_published_at:o.source_published_at||null,
       offer_sources:{name:o.offer_sources?.name||'Неуточнен източник'}
     }
