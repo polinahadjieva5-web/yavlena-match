@@ -773,7 +773,7 @@ export default function Buyers(){
       <div className="toolbar" style={{alignItems:'flex-start'}}>
         <div>
           <h2 style={{margin:0}}>Оферти за {selected.full_name}</h2>
-          <div className="meta">По сайтове, с директен достъп до всяка обява. Частните лица се маркират само при достатъчни доказателства.</div>
+          <div className="meta">По сайтове, с директен достъп до всяка обява. „Частни“ означава потвърден произход от раздел за частни обяви или изрично указан тип подател; собствеността не е независимо проверена.</div>
           <div className="meta" style={{marginTop:7}}>Общо: <b>{results.length}</b> · Частни: <b>{advertiserCounts.private}</b> · Агенции: <b>{advertiserCounts.agency}</b> · Неуточнени: <b>{advertiserCounts.unknown}</b></div>
           {activeRun&&<div className="meta">Архивирано търсене от {new Date(activeRun.started_at).toLocaleString('bg-BG')}</div>}
         </div>
@@ -784,7 +784,7 @@ export default function Buyers(){
       </div>
       <div className="historyPanel">
         <div className="historyTop">
-          <div><strong>История на търсенията</strong><div className="meta">Запазва се на това устройство и в този браузър, включително след презареждане. Не се синхронизира между устройства.</div></div>
+          <div><strong>История на търсенията</strong><div className="meta">Локалните резултати се пазят в този браузър. Търсенията се синхронизират през Supabase само ако архивирането е потвърдено.</div></div>
           <span className="tag">{history.length} записа</span>
         </div>
         {history.length>0&&<div className="historyEntries">
