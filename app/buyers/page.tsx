@@ -795,7 +795,7 @@ export default function Buyers(){
       </div>
       {localNotice&&<div className={/НЕ записа|не е потвърден|невалиден|не съвпад|грешка/i.test(localNotice)?'err':'ok'} role="status" style={{marginBottom:10}}>{localNotice}</div>}
       {(activeRun as any)?._server&&Number((activeRun as any)._offer_count||0)===0&&results.length>0&&<div className="err" role="alert" style={{marginBottom:10}}>Виждат се {results.length} локални резултата, но избраното сървърно търсене е с 0 записани оферти. Те още НЕ са съхранени в Supabase. Прочети диагностиката на локалния бот по-горе.</div>}
-      {historyWarning&&<div className="err" role="alert">{historyWarning}</div>
+      {historyWarning&&<div className="err" role="alert">{historyWarning}</div>}
       <div className="filterBar">{([{id:'all',label:'Всички',count:results.length},{id:'private',label:'Частни лица',count:advertiserCounts.private},{id:'agency',label:'Агенции',count:advertiserCounts.agency},{id:'unknown',label:'Неуточнени',count:advertiserCounts.unknown}] as const).map(x=><button key={x.id} className={resultFilter===x.id?'btn primary':'btn'} type="button" onClick={()=>setResultFilter(x.id)}>{x.label} ({x.count})</button>)}</div>
       {resultsLoading?<div className="empty">Зареждам запазените търсения...</div>:
       <div className="portalList">
