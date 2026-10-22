@@ -139,6 +139,12 @@ export default function Buyers(){
   const[portalProgress,setPortalProgress]=useState<Record<string,{pages:number;found:number;private:number;details:number;raw:number;status:string}>>({})
   const[supabaseIssues,setSupabaseIssues]=useState<string[]>([])
   const[exporting,setExporting]=useState(false)
+  const[localKey,setLocalKey]=useState('')
+  const[localNotice,setLocalNotice]=useState('')
+  const[localBusy,setLocalBusy]=useState<string|null>(null)
+  const[localProgress,setLocalProgress]=useState('')
+  useEffect(()=>{try{setLocalKey(window.sessionStorage.getItem('yavlena-local-agent-code')||'')}catch{}},[])
+
 
   async function load(){
     const{data:{user}}=await supabase.auth.getUser()
@@ -363,6 +369,95 @@ export default function Buyers(){
       setSearchProgress({done,total,label:`${ep.name} приключи`})
     }))
     return all
+  }
+
+
+  const LOCAL_AGENT='http://127.0.0.1:17841'
+  async function agentRequest(path:string,options:any={}){
+    const code=(localKey||'').trim()
+    if(!code)throw new Error('Въведи кода, показан в START_AUTO_WINDOWS.bat.')
+    const response=await fetch(LOCAL_AGENT+path,{
+      method:options.body?'POST':'GET',
+      headers:{'Content-Type':'application/json','X-Yavlena-Token':code},
+      ...(options.body?{body:JSON.stringify(options.body)}:{})
+    })
+    const json=await response.json().catch(()=>null)
+    if(!response.ok||!json?.ok)throw new Error(json?.error||('Локалният бот върна HTTP '+response.status))
+    return json
+  }
+  function saveAgentCode(){
+    try{window.sessionStorage.setItem('yavlena-local-agent-code',localKey.trim())}catch{}
+    setLocalNotice('Кодът е запазен само за текущата сесия на браузъра. Провери връзката.')
+  }
+  async function testAgent(){
+    try{const data=await agentRequest('/health');setLocalNotice(data.busy?'Локалният бот работи по търсене.':'Локалният бот е свързан и готов.')}
+    catch(e:any){setLocalNotice('Не мога да се свържа: '+String(e?.message||e)+'. Стартирай START_AUTO_WINDOWS.bat и разреши локалната мрежа, ако браузърът попита.')}
+  }
+  async function openAgentLogin(){
+    try{const data=await agentRequest('/login',{body:{}});setLocalNotice(data.message||'В браузъра на бота влез в Estate Assistant.')}
+    catch(e:any){setLocalNotice('Неуспешен вход: '+String(e?.message||e))}
+  }
+  function localOffersToRows(listings:any[],criteria:any){
+    return listings.filter(x=>x?.result==='candidate' && x?.url && x?.property_type && x?.district).map(x=>({
+      id:'local:'+String(x.url),
+      score:80, status:'new', created_at:new Date().toISOString(),
+      offers:{
+        title:x.title||'Обява',original_url:x.url,
+        description:String(x.description||'').slice(0,1000),
+        property_type:x.property_type,district:x.district,
+        price_eur:x.price_eur??null,area_sqm:x.area_sqm??null,
+        floor:x.floor??null,total_floors:x.total_floors??null,
+        construction_type:x.construction_type??null,
+        advertiser_type:x.advertiser_type||'unknown',
+        deal_type:criteria?.deal_type==='rent'?'rent':'sale',
+        offer_sources:{name:'Estate Assistant'}
+      }
+    }))
+  }
+  async function startLocalSearch(b:any){
+    const criteria=b.buyer_searches?.[0]
+    if(!criteria)return setLocalNotice('Този купувач няма критерии.')
+    if(localBusy)return setLocalNotice('Локалният бот вече обработва търсене.')
+    setLocalBusy(b.id);setLocalNotice('');setLocalProgress('Изпращам задачата към локалния бот...')
+    try{
+      const started=await agentRequest('/run',{body:{criteria,maxPages:3,maxOffers:40}})
+      let end:any=null
+      for(let i=0;i<1200;i++){
+        await new Promise(resolve=>setTimeout(resolve,1500))
+        const state=await agentRequest('/job/'+started.id)
+        setLocalProgress(state.progress||'Браузърният бот работи...')
+        if(state.status==='completed'){end=state.result;break}
+        if(state.status==='failed')throw new Error(state.error||'Грешка при автоматично търсене.')
+      }
+      if(!end)throw new Error('Търсенето продължи твърде дълго или няма отговор.')
+      const candidates=localOffersToRows(end.listings||[],criteria)
+      setSelected(b);setResultsHidden(false);setResultFilter('all')
+      setResults(prev=>mergeResults(prev,candidates))
+      if(!candidates.length){setLocalNotice('Ботът завърши: няма потвърдени кандидати по извлечените критерии. Другите обяви остават за проверка в локалния отчет.');return}
+      // Archive via the EXISTING authenticated Edge Function; no service-role key is kept on Windows.
+      let runId:string|null=null;let rejected=0;let saved=0
+      try{
+        const start:any=await supabase.functions.invoke('buyer-search-archive',{body:{action:'start',buyer_id:b.id}})
+        if(start.error||!start.data?.ok)throw start.error||new Error(start.data?.error||'Неуспешно започване на архив')
+        runId=start.data.run_id
+        for(let p=0;p<candidates.length;p+=50){
+          const part:any=await supabase.functions.invoke('buyer-search-archive',{
+            body:{action:'append',buyer_id:b.id,run_id:runId,items:candidates.slice(p,p+50)}
+          })
+          if(part.error||!part.data?.ok)throw part.error||new Error(part.data?.error||'Неуспешно записване')
+          saved+=Number(part.data.saved||0);rejected+=Number(part.data.rejected||0)
+        }
+        const finish:any=await supabase.functions.invoke('buyer-search-archive',{
+          body:{action:'finish',buyer_id:b.id,run_id:runId,partial:!!(!end.diagnostics?.pagination_complete||rejected)}
+        })
+        if(finish.error||!finish.data?.ok)throw finish.error||new Error(finish.data?.error||'Неуспешно приключване на архив')
+        setLocalNotice('Готово: '+candidates.length+' кандидата; '+saved+' записани в историята за този купувач'+(rejected?'; '+rejected+' отхвърлени от проверките.':'.'))
+      }catch(e:any){
+        setLocalNotice('Ботът намери '+candidates.length+' кандидата, но архивът не е потвърден: '+String(e?.message||e)+'. Резултатите са показани тук; не ги приемай за записани.')
+      }
+    }catch(e:any){
+      setLocalNotice('Локално търсене: '+String(e?.message||e)+'. Ако сесията е изтекла, натисни „Отвори вход“ и влез в Estate Assistant.')
+    }finally{setLocalBusy(null);setLocalProgress('')}
   }
 
   async function searchNow(b:any){
@@ -618,6 +713,20 @@ export default function Buyers(){
 
   return <>
     <div className="topline"><div><div className="eyebrow">Клиентски търсения</div><h1>Моите купувачи</h1><div className="subtitle">Търсене за всеки купувач по сайтовете, с частни лица, оригинални линкове и история.</div></div><button className="btn primary" onClick={openCreate}><Plus size={17}/>Добави купувач</button></div>
+
+    <div className="card" style={{marginBottom:12,padding:14}}>
+      <b>Локален браузърен бот — Estate Assistant</b>
+      <div className="meta" style={{margin:'7px 0'}}>Стартирай START_AUTO_WINDOWS.bat на този компютър. Копирай кода от черния прозорец тук. Ботът не изисква Enter за всяко търсене.</div>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+        <input type="password" style={{maxWidth:340,padding:'10px 12px',borderRadius:8,border:'1px solid #b9c9c2'}} placeholder="Код от локалния бот" value={localKey} onChange={e=>setLocalKey(e.target.value)} autoComplete="off"/>
+        <button className="btn" type="button" onClick={saveAgentCode}>Запази кода</button>
+        <button className="btn" type="button" onClick={testAgent}>Провери връзката</button>
+        <button className="btn" type="button" onClick={openAgentLogin}>Отвори вход в Estate Assistant</button>
+      </div>
+      {localProgress&&<div className="ok" style={{marginTop:8}}>{localProgress}</div>}
+      {localNotice&&<div style={{marginTop:8,fontSize:13}}>{localNotice}</div>}
+      <div className="meta" style={{marginTop:8}}>Първи тест: до 3 страници и 40 обяви. Необходим е работещ компютър. Частните обяви остават кандидати за проверка, не доказана собственост.</div>
+    </div>
     {searchInfo&&<div className="ok" style={{marginBottom:10}}>{searchInfo}</div>}
     {(searching||deepScanning)&&<div className="card" style={{marginBottom:14,padding:14}}>
       <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',alignItems:'center'}}>
@@ -637,7 +746,7 @@ export default function Buyers(){
     <div className="listCard">
       {buyers.length?buyers.map(b=>{const s=b.buyer_searches?.[0];return <div className="buyerBlock" key={b.id}>
         <div className="buyerRow"><span className="statusDot"/><div className="grow"><b>{b.full_name}</b><div className="meta">{(s?.property_types||[]).join(', ')||'Имот'} · {(s?.districts||[]).join(', ')||'Всички райони'} · {s?.price_min?`от €${Number(s.price_min).toLocaleString('bg-BG')} · `:''}{s?.price_max?`до €${Number(s.price_max).toLocaleString('bg-BG')}`:'без горен лимит'}{s?.area_min?` · от ${s.area_min} кв.м`:''}{s?.area_max?` · до ${s.area_max} кв.м`:''}</div><div className="meta">{s?.floor_min!=null?`етаж от ${s.floor_min} · `:''}{s?.floor_max!=null?`етаж до ${s.floor_max} · `:''}{(s?.construction_types||[]).length?`${s.construction_types.join(', ')} · `:''}{s?.year_min?`след ${s.year_min} г. · `:''}{s?.last_manual_search_at?`последно търсене ${new Date(s.last_manual_search_at).toLocaleString('bg-BG')}`:'няма стартирано търсене'}</div></div><span className="tag">{s?.monitoring_enabled?'Мониторинг включен':'Мониторинг изключен'}</span></div>
-        <div className="buyerActions"><button className="btn primary" onClick={()=>searchNow(b)} disabled={searching===b.id}><Search size={16}/>{searching===b.id?'Проверявам сайтовете...':'Търси в сайтовете'}</button><button className="btn" onClick={()=>openResults(b)}>{selected?.id===b.id&&resultsHidden?'Покажи резултатите':'Виж резултати'}</button><button className="btn" onClick={()=>loadMatches(b)}>История на търсенията</button><button className="btn" onClick={()=>toggleMonitoring(b)}>{s?.monitoring_enabled?<BellOff size={16}/>:<Bell size={16}/>} {s?.monitoring_enabled?'Спри известия':'Включи известия'}</button><button className="btn" onClick={()=>openEdit(b)}><Pencil size={15}/>Редактирай</button><button className="btn" onClick={()=>deleteBuyer(b)}><Trash2 size={15}/>Изтрий</button></div>
+        <div className="buyerActions"><button className="btn primary" onClick={()=>searchNow(b)} disabled={searching===b.id}><Search size={16}/>{searching===b.id?'Проверявам сайтовете...':'Търси в сайтовете'}</button><button type="button" className="btn" onClick={()=>startLocalSearch(b)} disabled={!!localBusy}>{localBusy===b.id?'Търся локално...':'Търси с локален бот'}</button><button className="btn" onClick={()=>openResults(b)}>{selected?.id===b.id&&resultsHidden?'Покажи резултатите':'Виж резултати'}</button><button className="btn" onClick={()=>loadMatches(b)}>История на търсенията</button><button className="btn" onClick={()=>toggleMonitoring(b)}>{s?.monitoring_enabled?<BellOff size={16}/>:<Bell size={16}/>} {s?.monitoring_enabled?'Спри известия':'Включи известия'}</button><button className="btn" onClick={()=>openEdit(b)}><Pencil size={15}/>Редактирай</button><button className="btn" onClick={()=>deleteBuyer(b)}><Trash2 size={15}/>Изтрий</button></div>
       </div>}):<div className="empty" style={{margin:'14px 0'}}>Няма добавени купувачи.</div>}
     </div>
 
