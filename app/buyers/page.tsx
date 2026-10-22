@@ -28,6 +28,11 @@ function advertiserCategory(r:any):'private'|'agency'|'unknown'{
   if(source.includes('yavlena')||/(?:^|[\s.,-])(агенция|недвижими имоти|имоти|естейт|estate|properties|realty|пропъртис|брокер|оод|еоод)(?:$|[\s.,-])/i.test(name))return'agency'
   if(/(?:агенция(?:та)?\s+(?:за\s+недвижими\s+имоти\s+)?(?:предлага|представя|продава|отдава)|брокер(?:ът)?\s+(?:предлага|представя)|нашата\s+агенция|оферта\s+на\s+агенция)/i.test(description))return'agency'
   if(declared==='agency')return'agency'
+  // Verified provenance of local Playwright browser searches in Web оферти.
+  // This labels the source category, NOT independent proof of ownership.
+  const raw=o.raw_payload||{}
+  if(source==='estate assistant'&&declared==='private'&&
+     raw.origin==='estate_assistant_web_offers'&&raw.seller_classification_basis==='private_source_section')return'private'
   if(declared==='private'){
     // Old Estate Assistant and Imot.bg data could incorrectly infer private sellers.
     if(source==='imot.bg')return'private' // This public source uses the explicit publisher contact label.
@@ -409,6 +414,12 @@ export default function Buyers(){
         floor:x.floor??null,total_floors:x.total_floors??null,
         construction_type:x.construction_type??null,
         advertiser_type:x.advertiser_type||'unknown',
+        advertiser_name:null,
+        raw_payload:{
+          origin:x.seller_classification_basis==='private_source_section'?'estate_assistant_web_offers':'unverified',
+          seller_classification_basis:x.seller_classification_basis||'unknown',
+          verification:'source-only'
+        },
         deal_type:criteria?.deal_type==='rent'?'rent':'sale',
         offer_sources:{name:'Estate Assistant'}
       }
@@ -435,7 +446,7 @@ export default function Buyers(){
       setResults(mergeResults(candidates))
       if(!candidates.length){setLocalNotice('Ботът завърши: няма потвърдени кандидати по извлечените критерии. Другите обяви остават за проверка в локалния отчет.');return}
       // Archive via the EXISTING authenticated Edge Function; no service-role key is kept on Windows.
-      let runId:string|null=null;let rejected=0;let saved=0
+      let runId:string|null=null;let rejected=0;let saved=0;const rejectionDetails:Record<string,number>={}
       try{
         const start:any=await supabase.functions.invoke('buyer-search-archive',{body:{action:'start',buyer_id:b.id}})
         if(start.error||!start.data?.ok)throw start.error||new Error(start.data?.error||'Неуспешно започване на архив')
@@ -446,12 +457,20 @@ export default function Buyers(){
           })
           if(part.error||!part.data?.ok)throw part.error||new Error(part.data?.error||'Неуспешно записване')
           saved+=Number(part.data.saved||0);rejected+=Number(part.data.rejected||0)
+          for(const [reason,count] of Object.entries(part.data.rejected_by_reason||{})){
+            rejectionDetails[reason]=(rejectionDetails[reason]||0)+Number(count||0)
+          }
         }
         const finish:any=await supabase.functions.invoke('buyer-search-archive',{
           body:{action:'finish',buyer_id:b.id,run_id:runId,partial:!!(!end.diagnostics?.pagination_complete||rejected)}
         })
         if(finish.error||!finish.data?.ok)throw finish.error||new Error(finish.data?.error||'Неуспешно приключване на архив')
-        setLocalNotice('Готово: '+candidates.length+' кандидата; '+saved+' записани в историята за този купувач'+(rejected?'; '+rejected+' отхвърлени от проверките.':'.'))
+        const {data:{user}}=await supabase.auth.getUser()
+        if(user){try{const runs=await searchHistory(b,user.id);setHistory(runs);setActiveRun(runs.find(r=>r.id===runId)||null)}catch{}}
+        const rejectedNote=Object.entries(rejectionDetails).map(([reason,count])=>reason+': '+count).join(', ')
+        setLocalNotice(saved===0
+          ? 'Ботът намери '+candidates.length+' кандидата, но Supabase НЕ записа нито един. '+(rejectedNote||'Виж статуса на архива.')+' Провери критериите и оригиналните линкове.'
+          : 'Готово: '+candidates.length+' кандидата; '+saved+' записани в историята за този купувач'+(rejected?'; '+rejected+' отхвърлени ('+(rejectedNote||'неподходящи данни')+').':'.'))
       }catch(e:any){
         setLocalNotice('Ботът намери '+candidates.length+' кандидата, но архивът не е потвърден: '+String(e?.message||e)+'. Резултатите са показани тук; не ги приемай за записани.')
       }
