@@ -469,7 +469,7 @@ export default function Buyers(){
         if(user){try{const runs=await searchHistory(b,user.id);setHistory(runs);setActiveRun(runs.find(r=>r.id===runId)||null)}catch{}}
         const rejectedNote=Object.entries(rejectionDetails).map(([reason,count])=>reason+': '+count).join(', ')
         setLocalNotice(saved===0
-          ? 'Ботът намери '+candidates.length+' кандидата, но Supabase НЕ записа нито един. '+(rejectedNote||'Виж статуса на архива.')+' Провери критериите и оригиналните линкове.'
+          ? 'Ботът намери '+candidates.length+' кандидата, но Supabase НЕ записа нито един. Причини: '+(rejectedNote||'няма посочена причина; провери оригиналните линкове и типа/района на обявите')+'.'
           : 'Готово: '+candidates.length+' кандидата; '+saved+' записани в историята за този купувач'+(rejected?'; '+rejected+' отхвърлени ('+(rejectedNote||'неподходящи данни')+').':'.'))
       }catch(e:any){
         setLocalNotice('Ботът намери '+candidates.length+' кандидата, но архивът не е потвърден: '+String(e?.message||e)+'. Резултатите са показани тук; не ги приемай за записани.')
@@ -775,7 +775,7 @@ export default function Buyers(){
           <h2 style={{margin:0}}>Оферти за {selected.full_name}</h2>
           <div className="meta">По сайтове, с директен достъп до всяка обява. „Частни“ означава потвърден произход от раздел за частни обяви или изрично указан тип подател; собствеността не е независимо проверена.</div>
           <div className="meta" style={{marginTop:7}}>Общо: <b>{results.length}</b> · Частни: <b>{advertiserCounts.private}</b> · Агенции: <b>{advertiserCounts.agency}</b> · Неуточнени: <b>{advertiserCounts.unknown}</b></div>
-          {activeRun&&<div className="meta">Архивирано търсене от {new Date(activeRun.started_at).toLocaleString('bg-BG')}</div>}
+          {activeRun&&<div className="meta">{(activeRun as any)._server&&Number((activeRun as any)._offer_count||0)===0?'Сървърно търсене без записани оферти от ':'Архивирано търсене от '}{new Date(activeRun.started_at).toLocaleString('bg-BG')}</div>}
         </div>
         <div className="buyerActions" style={{padding:0}}>
           <button type="button" className="btn primary" onClick={()=>exportPdf(selected,results,activeRun)} disabled={exporting}>{exporting?'Създавам PDF...':'Изтегли справка (PDF)'}</button>
@@ -793,7 +793,9 @@ export default function Buyers(){
           </button>)}
         </div>}
       </div>
-      {historyWarning&&<div className="err" role="alert">{historyWarning}</div>}
+      {localNotice&&<div className={/НЕ записа|не е потвърден|невалиден|не съвпад|грешка/i.test(localNotice)?'err':'ok'} role="status" style={{marginBottom:10}}>{localNotice}</div>}
+      {(activeRun as any)?._server&&Number((activeRun as any)._offer_count||0)===0&&results.length>0&&<div className="err" role="alert" style={{marginBottom:10}}>Виждат се {results.length} локални резултата, но избраното сървърно търсене е с 0 записани оферти. Те още НЕ са съхранени в Supabase. Прочети диагностиката на локалния бот по-горе.</div>}
+      {historyWarning&&<div className="err" role="alert">{historyWarning}</div>
       <div className="filterBar">{([{id:'all',label:'Всички',count:results.length},{id:'private',label:'Частни лица',count:advertiserCounts.private},{id:'agency',label:'Агенции',count:advertiserCounts.agency},{id:'unknown',label:'Неуточнени',count:advertiserCounts.unknown}] as const).map(x=><button key={x.id} className={resultFilter===x.id?'btn primary':'btn'} type="button" onClick={()=>setResultFilter(x.id)}>{x.label} ({x.count})</button>)}</div>
       {resultsLoading?<div className="empty">Зареждам запазените търсения...</div>:
       <div className="portalList">
