@@ -403,13 +403,18 @@ export default function Buyers(){
     catch(e:any){setLocalNotice('Неуспешен вход: '+String(e?.message||e))}
   }
   function localOffersToRows(listings:any[],criteria:any){
-    return listings.filter(x=>x?.result==='candidate' && x?.url && x?.property_type && x?.district).map(x=>({
+    // Keep candidates AND uncertain but concrete listings visible. A missing
+    // construction type or area must not be confused with a definite mismatch.
+    return listings.filter(x=>(x?.result==='candidate'||x?.result==='needs_review')&&/^https:\/\//i.test(String(x?.url||''))).map(x=>({
       id:'local:'+String(x.url),
-      score:80, status:'new', created_at:new Date().toISOString(),
+      score:x.result==='candidate'?80:40,
+      status:'new', created_at:new Date().toISOString(),
+      _local_verification:x.result,
+      _local_notes:Array.isArray(x.verification_notes)?x.verification_notes:[],
       offers:{
-        title:x.title||'Обява',original_url:x.url,
+        title:x.title||'Обява за проверка',original_url:x.url,
         description:String(x.description||'').slice(0,1000),
-        property_type:x.property_type,district:x.district,
+        property_type:x.property_type||null,district:x.district||null,
         price_eur:x.price_eur??null,area_sqm:x.area_sqm??null,
         floor:x.floor??null,total_floors:x.total_floors??null,
         construction_type:x.construction_type??null,
@@ -418,7 +423,8 @@ export default function Buyers(){
         raw_payload:{
           origin:x.seller_classification_basis==='private_source_section'?'estate_assistant_web_offers':'unverified',
           seller_classification_basis:x.seller_classification_basis||'unknown',
-          verification:'source-only'
+          verification:'source-only',local_result:x.result,
+          verification_notes:Array.isArray(x.verification_notes)?x.verification_notes.slice(0,15):[]
         },
         deal_type:criteria?.deal_type==='rent'?'rent':'sale',
         offer_sources:{name:'Estate Assistant'}
@@ -441,11 +447,42 @@ export default function Buyers(){
         if(state.status==='failed')throw new Error(state.error||'Грешка при автоматично търсене.')
       }
       if(!end)throw new Error('Търсенето продължи твърде дълго или няма отговор.')
-      const candidates=localOffersToRows(end.listings||[],criteria)
+      const visible=localOffersToRows(end.listings||[],criteria)
+      const candidates=visible.filter(x=>x._local_verification==='candidate'&&x.offers.property_type&&x.offers.district)
+      const reviewCount=visible.length-candidates.length
+      const mismatchCount=Number(end.stats?.mismatch||0)
+      const skippedCount=Number(end.diagnostics?.skipped?.length||0)
       setSelected(b);setResultsHidden(false);setResultFilter('all');setActiveRun(null)
-      setResults(mergeResults(candidates))
-      if(!candidates.length){setLocalNotice('Ботът завърши: няма потвърдени кандидати по извлечените критерии. Другите обяви остават за проверка в локалния отчет.');return}
-      // Archive via the EXISTING authenticated Edge Function; no service-role key is kept on Windows.
+      setResults(mergeResults(visible))
+      // Save *all* locally visible results on this device, even if none meet
+      // every criterion. Supabase receives only the fully extracted candidates.
+      let localSaved=false
+      try{
+        const {data:{user}}=await supabase.auth.getUser()
+        if(user){
+          const localRunId=crypto.randomUUID()
+          const localRun:SavedSearch={
+            id:localRunId,user_id:user.id,buyer_id:b.id,
+            started_at:new Date().toISOString(),status:'running',
+            buyer:{id:b.id,full_name:b.full_name},
+            criteria:{...criteria},offers:[]
+          }
+          await saveSearchRun(localRun)
+          await appendSearchOffers(localRunId,visible)
+          await completeSearchRun(localRunId,'completed')
+          const runs=await searchHistory(b,user.id)
+          setHistory(runs)
+          setActiveRun(runs.find(x=>x.id===localRunId)||null)
+          localSaved=true
+        }
+      }catch(e:any){setHistoryWarning('Не успях да запазя локалния отчет в браузъра: '+String(e?.message||e))}
+      const scanNote='Прочетени: '+(end.listings||[]).length+'; сигурни кандидати по извлечените данни: '+candidates.length+'; за проверка: '+reviewCount+'; несъвпадения: '+mismatchCount+'; пропуснати страници: '+skippedCount+'. '
+      if(!candidates.length){
+        setLocalNotice(scanNote+(reviewCount?'Отвори Estate Assistant в списъка и виж причините защо обявите са за проверка. ':'')+(localSaved?'Отчетът е записан локално. ':'Отчетът не е потвърден като локално записан. ')+'Няма потвърдени кандидати за запис в Supabase.')
+        return
+      }
+      // Archive only confirmed-by-extracted-fields candidates via the
+      // existing authenticated Edge Function, without Windows admin secrets.
       let runId:string|null=null;let rejected=0;let saved=0;const rejectionDetails:Record<string,number>={}
       try{
         const start:any=await supabase.functions.invoke('buyer-search-archive',{body:{action:'start',buyer_id:b.id}})
@@ -469,10 +506,10 @@ export default function Buyers(){
         if(user){try{const runs=await searchHistory(b,user.id);setHistory(runs);setActiveRun(runs.find(r=>r.id===runId)||null)}catch{}}
         const rejectedNote=Object.entries(rejectionDetails).map(([reason,count])=>reason+': '+count).join(', ')
         setLocalNotice(saved===0
-          ? 'Ботът намери '+candidates.length+' кандидата, но Supabase НЕ записа нито един. Причини: '+(rejectedNote||'няма посочена причина; провери оригиналните линкове и типа/района на обявите')+'.'
-          : 'Готово: '+candidates.length+' кандидата; '+saved+' записани в историята за този купувач'+(rejected?'; '+rejected+' отхвърлени ('+(rejectedNote||'неподходящи данни')+').':'.'))
+          ? scanNote+'Supabase НЕ записа нито един кандидат. Причини: '+(rejectedNote||'няма посочена причина; провери оригиналните линкове и типа/района на обявите')+'. Локалният отчет '+(localSaved?'е запазен.':'не е потвърден като записан.')
+          : scanNote+saved+' кандидата са записани в Supabase'+(rejected?'; '+rejected+' отхвърлени ('+(rejectedNote||'неподходящи данни')+').':'.')+(localSaved?' Останалите обяви са запазени локално.':''))
       }catch(e:any){
-        setLocalNotice('Ботът намери '+candidates.length+' кандидата, но архивът не е потвърден: '+String(e?.message||e)+'. Резултатите са показани тук; не ги приемай за записани.')
+        setLocalNotice(scanNote+'Сървърният архив не е потвърден: '+String(e?.message||e)+'. '+(localSaved?'Резултатите остават в локалната история.':'Резултатите са показани, но локалният запис не е потвърден.'))
       }
     }catch(e:any){
       setLocalNotice('Локално търсене: '+String(e?.message||e)+'. Ако сесията е изтекла, натисни „Отвори вход“ и влез в Estate Assistant.')
@@ -718,10 +755,13 @@ export default function Buyers(){
         <div className="offerTop">
           <b>{o.title||o.property_type||'Имотна оферта'}</b>
           <span className={category==='private'?'pill private':category==='agency'?'pill agency':'pill'}>{seller}</span>
-          <span className="tag">{r._active_validation==='active'?'Проверена оферта':'Статусът не е потвърден'}</span>
+          {r._local_verification==='needs_review'&&<span className="tag" style={{color:'#8a510d'}}>За проверка по критериите</span>}
+          {r._local_verification==='candidate'&&<span className="tag">Кандидат по извлечените данни</span>}
+          <span className="tag">{r._active_validation==='active'?'Проверена оферта':'Статусът на обявата не е потвърден'}</span>
         </div>
         <div className="meta">{o.district||'Район не е посочен'} · {o.price_eur!=null?Number(o.price_eur).toLocaleString('bg-BG')+' €':'Без цена'} · {o.area_sqm!=null?o.area_sqm+' кв.м':'Без площ'}</div>
         <div className="meta">Тип: {o.property_type||'—'} · Строителство: {o.construction_type||'—'} · Етаж: {o.floor??'—'} · Година: {o.construction_year??'—'}</div>
+        {r._local_verification==='needs_review'&&<div className="meta" style={{color:'#8a510d'}}>Причини за проверка: {(r._local_notes||o.raw_payload?.verification_notes||[]).filter((s:string)=>!s.includes('самоличност')&&!s.includes('собственик')).join('; ')||'Липсват потвърдени характеристики в оригиналната обява.'}</div>
         {(selected?.buyer_searches?.[0]?.floor_min!=null||selected?.buyer_searches?.[0]?.floor_max!=null)&&o.floor==null&&<div className="meta" style={{color:'#9b6208'}}>Етажът не е потвърден от източника — провери преди презентация.</div>}
         <div className="meta">Подател: {o.advertiser_name||seller}{o.contact_phone?' · Телефон: '+o.contact_phone:''}{o.source_published_at?' · Публикувана: '+new Date(o.source_published_at).toLocaleDateString('bg-BG'):''}</div>
         {variants.length>1&&<div className="meta">Публикации в същия източник: {variants.length}</div>}
