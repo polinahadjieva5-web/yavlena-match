@@ -431,8 +431,8 @@ export default function Buyers(){
       }
       if(!end)throw new Error('Търсенето продължи твърде дълго или няма отговор.')
       const candidates=localOffersToRows(end.listings||[],criteria)
-      setSelected(b);setResultsHidden(false);setResultFilter('all')
-      setResults(prev=>mergeResults(prev,candidates))
+      setSelected(b);setResultsHidden(false);setResultFilter('all');setActiveRun(null)
+      setResults(mergeResults(candidates))
       if(!candidates.length){setLocalNotice('Ботът завърши: няма потвърдени кандидати по извлечените критерии. Другите обяви остават за проверка в локалния отчет.');return}
       // Archive via the EXISTING authenticated Edge Function; no service-role key is kept on Windows.
       let runId:string|null=null;let rejected=0;let saved=0
